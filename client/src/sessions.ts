@@ -80,9 +80,13 @@ function createMessageStream() {
 }
 
 function bootstrapMessage(): any {
+  const serverUrl = process.env.SERVER_URL ?? "";
+  const text = serverUrl
+    ? `Session started from ${serverUrl}. No reply needed.`
+    : "Session started from claude-code-remote-control-manager. No reply needed.";
   return {
     type: "user",
-    message: { role: "user", content: "." },
+    message: { role: "user", content: text },
     parent_tool_use_id: null,
     isSynthetic: true,
     timestamp: new Date().toISOString(),

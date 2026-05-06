@@ -133,22 +133,43 @@ async function startQuery(opts: {
     rejectReady = rej;
   });
 
+  let enabled = false;
+  const enable = async (reason: string) => {
+    if (enabled) return;
+    enabled = true;
+    try {
+      await q.enableRemoteControl(true);
+      patch(opts.sessionId, { status: "running" });
+      resolveReady();
+      console.log(`session ${opts.sessionId}: remote control enabled (${reason})`);
+    } catch (err) {
+      enabled = false;
+      console.error(`session ${opts.sessionId}: enableRemoteControl failed (${reason})`, err);
+      patch(opts.sessionId, { status: "errored" });
+      rejectReady(err);
+    }
+  };
+
+  // For resumes, the SDK may never emit a fresh `system.init` (the session
+  // is already initialized). Fire enableRemoteControl after a short grace
+  // period regardless. For brand-new sessions we still prefer init since
+  // the bootstrap message guarantees it's coming.
+  if (opts.resume) {
+    setTimeout(() => {
+      enable("resume-timer").catch(() => {});
+    }, 1500);
+  }
+
   (async () => {
     try {
       for await (const msg of q as AsyncIterable<any>) {
         if (msg?.type === "system" && msg.subtype === "init") {
-          try {
-            await q.enableRemoteControl(true);
-            patch(opts.sessionId, { status: "running" });
-            resolveReady();
-          } catch (err) {
-            console.error(`session ${opts.sessionId}: enableRemoteControl failed`, err);
-            patch(opts.sessionId, { status: "errored" });
-            rejectReady(err);
-          }
+          await enable("init");
         }
         if (msg?.type === "assistant" || msg?.type === "user") {
           patch(opts.sessionId, { lastMessageAt: new Date().toISOString() });
+          // Fallback: any real traffic means the SDK is up; enable now.
+          if (!enabled) await enable("first-message");
         }
       }
       patch(opts.sessionId, { status: "stopped" });

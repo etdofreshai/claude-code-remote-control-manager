@@ -244,16 +244,12 @@ export async function bindExisting(
     status: "starting",
   };
   upsert(entry);
-  startQuery({ sessionId, workingDirectory, resume: true })
-    .then(async (rs) => {
-      try {
-        await rs.ready;
-        await applyName(sessionId, workingDirectory, name);
-      } catch (err) {
-        console.error(`bindExisting ${sessionId} init/rename failed`, err);
-      }
-    })
-    .catch((err) => console.error(`bindExisting ${sessionId} failed`, err));
+  // Don't push the name through the SDK on bind — only stored locally for
+  // our UI. Resuming + renameSession concurrently has caused hangs; the
+  // session keeps whatever title it already had on disk.
+  startQuery({ sessionId, workingDirectory, resume: true }).catch((err) =>
+    console.error(`bindExisting ${sessionId} failed`, err),
+  );
   return { ...entry };
 }
 

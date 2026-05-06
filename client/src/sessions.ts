@@ -211,20 +211,27 @@ export async function bindExisting(
 export async function renameTracked(
   sessionId: string,
   newName: string | undefined,
-): Promise<TrackedSession | null> {
+): Promise<TrackedSession & { sdkRename: "ok" | "timeout" | "error" | "skipped" }> {
   const list = load();
   const entry = list.find((s) => s.sessionId === sessionId);
-  if (!entry) return null;
+  if (!entry) throw new Error(`session ${sessionId} not tracked`);
+  let sdkRename: "ok" | "timeout" | "error" | "skipped" = "skipped";
   if (newName) {
     try {
-      await renameSession(sessionId, newName, { dir: entry.workingDirectory } as any);
+      await Promise.race([
+        renameSession(sessionId, newName, { dir: entry.workingDirectory } as any),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("renameSession timed out")), 10_000),
+        ),
+      ]);
+      sdkRename = "ok";
     } catch (err) {
-      console.error(`session ${sessionId}: rename failed`, err);
-      throw err;
+      console.error(`session ${sessionId}: SDK rename failed`, err);
+      sdkRename = String(err).includes("timed out") ? "timeout" : "error";
     }
   }
   patch(sessionId, { name: newName });
-  return { ...entry, name: newName };
+  return { ...entry, name: newName, sdkRename };
 }
 
 export async function removeSession(sessionId: string): Promise<{ removed: boolean }> {

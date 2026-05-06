@@ -2,6 +2,7 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 let selected = null;
 let lastFillKey = null;
+let lastClients = [];
 
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers ?? {}) };
@@ -21,6 +22,7 @@ function showResult(text) {
 
 async function loadClients() {
   const list = await api("/api/clients");
+  lastClients = list;
   const ul = $("#clients");
   ul.innerHTML = "";
   if (!list.length) {
@@ -130,6 +132,11 @@ function renderSessions(c) {
   }
 }
 
+function defaultWorkingDirFor(clientName) {
+  const list = lastClients ?? [];
+  return list.find((c) => c.name === clientName)?.defaultWorkingDirectory ?? "";
+}
+
 async function send(form, route) {
   if (!selected) {
     alert("Select a client first.");
@@ -145,6 +152,12 @@ async function send(form, route) {
     });
     showResult(JSON.stringify(r, null, 2));
     form.reset();
+    // Re-fill workingDirectory with the selected client's default rather than
+    // leaving it blank.
+    const def = defaultWorkingDirFor(selected);
+    for (const inp of form.querySelectorAll('input[name="workingDirectory"]')) {
+      inp.value = def;
+    }
     form.classList.add("hidden");
     loadClients();
   } catch (err) {

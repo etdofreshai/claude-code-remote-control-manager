@@ -143,8 +143,12 @@ async function startQuery(opts: {
       }
       patch(opts.sessionId, { status: "stopped" });
     } catch (err) {
-      console.error(`session ${opts.sessionId}: stream error`, err);
-      patch(opts.sessionId, { status: "errored" });
+      if (abort.signal.aborted) {
+        patch(opts.sessionId, { status: "stopped" });
+      } else {
+        console.error(`session ${opts.sessionId}: stream error`, err);
+        patch(opts.sessionId, { status: "errored" });
+      }
     } finally {
       running.delete(opts.sessionId);
     }

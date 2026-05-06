@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import fastifyCookie from "@fastify/cookie";
+import fastifyFormbody from "@fastify/formbody";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as registry from "./clients.js";
@@ -18,6 +19,7 @@ registry.loadFromEnv();
 
 const app = Fastify({ logger: true });
 await app.register(fastifyCookie);
+await app.register(fastifyFormbody);
 await app.register(fastifyStatic, {
   root: path.join(__dirname, "..", "public"),
   prefix: "/static/",
@@ -61,12 +63,7 @@ app.get("/login", async (_req, reply) => {
 
 app.post("/api/login", async (req, reply) => {
   const body = (req.body ?? {}) as { password?: string };
-  const password =
-    body.password ??
-    (typeof req.body === "string"
-      ? new URLSearchParams(req.body).get("password") ?? undefined
-      : undefined);
-  if (password !== UI_PASSWORD) {
+  if (body.password !== UI_PASSWORD) {
     reply.code(401).type("text/html").send("Wrong password. <a href=/login>Try again</a>");
     return;
   }

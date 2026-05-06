@@ -1,7 +1,7 @@
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 let selected = null;
-let lastFilledForClient = null;
+let lastFillKey = null;
 
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers ?? {}) };
@@ -52,11 +52,15 @@ function renderSessions(c) {
   for (const inp of document.querySelectorAll('input[name="workingDirectory"]')) {
     inp.placeholder = def || "/home/node/workspace/repos/foo";
   }
-  if (c && lastFilledForClient !== c.name) {
+  // Refill when client changes OR when this client's default arrives later
+  // (server may not have it yet right after a restart, before the next
+  // register tick from the client).
+  const fillKey = c ? `${c.name}|${def}` : null;
+  if (c && def && lastFillKey !== fillKey) {
     for (const inp of document.querySelectorAll('input[name="workingDirectory"]')) {
       inp.value = def;
     }
-    lastFilledForClient = c.name;
+    lastFillKey = fillKey;
   }
   const ul = $("#sessions");
   ul.innerHTML = "";

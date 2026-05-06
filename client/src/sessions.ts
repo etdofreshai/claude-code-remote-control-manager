@@ -96,7 +96,11 @@ async function startQuery(opts: {
 }): Promise<RunningSession> {
   const { stream, push, close } = createMessageStream();
   const abort = new AbortController();
-  push(bootstrapMessage());
+  // Bootstrap only on brand-new sessions: the SDK needs *some* input to
+  // fire its init event before we can call enableRemoteControl(). Resumed
+  // sessions (bind + reboot-time restore) init from existing transcript
+  // state, so no synthetic message is needed.
+  if (!opts.resume) push(bootstrapMessage());
 
   const queryOptions: any = {
     cwd: opts.workingDirectory,

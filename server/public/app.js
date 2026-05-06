@@ -47,6 +47,11 @@ async function loadClients() {
 
 function renderSessions(c) {
   $("#selected-name").textContent = c ? `· ${c.name}` : "";
+  const def = c?.defaultWorkingDirectory ?? "";
+  for (const inp of document.querySelectorAll('input[name="workingDirectory"]')) {
+    inp.placeholder = def || "/home/node/workspace/repos/foo";
+    if (!inp.value) inp.value = def;
+  }
   const ul = $("#sessions");
   ul.innerHTML = "";
   const sessions = (c?.sessions ?? [])

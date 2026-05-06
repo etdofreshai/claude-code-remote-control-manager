@@ -12,6 +12,7 @@ import {
 const SERVER_URL = (process.env.SERVER_URL ?? "").replace(/\/+$/, "");
 const CLIENT_TOKEN = process.env.CLIENT_TOKEN ?? "";
 const AGENT_NAME = process.env.AGENT_NAME ?? os.hostname();
+const DEFAULT_WORKING_DIRECTORY = process.env.DEFAULT_WORKING_DIRECTORY ?? "";
 
 if (!SERVER_URL) throw new Error("SERVER_URL required");
 if (!CLIENT_TOKEN) throw new Error("CLIENT_TOKEN required");
@@ -47,6 +48,7 @@ async function register(): Promise<void> {
     name: AGENT_NAME,
     hostname: os.hostname(),
     platform: process.platform,
+    defaultWorkingDirectory: DEFAULT_WORKING_DIRECTORY || undefined,
     sessions: listTracked(),
   });
 }

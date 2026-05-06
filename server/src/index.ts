@@ -30,6 +30,7 @@ interface Agent {
   name: string;
   hostname?: string;
   platform?: string;
+  defaultWorkingDirectory?: string;
   registeredAt: string;
   lastSeenAt: string;
   sessions: TrackedSession[];
@@ -56,6 +57,8 @@ function touchAgent(name: string, info: Partial<Agent> = {}): Agent {
     name,
     hostname: info.hostname ?? prev?.hostname,
     platform: info.platform ?? prev?.platform,
+    defaultWorkingDirectory:
+      info.defaultWorkingDirectory ?? prev?.defaultWorkingDirectory,
     registeredAt: prev?.registeredAt ?? now,
     lastSeenAt: now,
     sessions: info.sessions ?? prev?.sessions ?? [],

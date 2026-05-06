@@ -196,6 +196,7 @@ async function loadBrowsePage() {
       li.onclick = () => {
         $("#bind-form input[name='sessionId']").value = s.sessionId;
         $("#session-browser").classList.add("hidden");
+        $("#bind-form").requestSubmit();
       };
       ul.appendChild(li);
     }

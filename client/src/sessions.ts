@@ -93,6 +93,7 @@ async function startQuery(opts: {
   sessionId: string;
   workingDirectory: string;
   resume: boolean;
+  name?: string;
 }): Promise<RunningSession> {
   const { stream, push, close } = createMessageStream();
   const abort = new AbortController();
@@ -111,6 +112,7 @@ async function startQuery(opts: {
   };
   if (opts.resume) queryOptions.resume = opts.sessionId;
   else queryOptions.sessionId = opts.sessionId;
+  if (opts.name) queryOptions.extraArgs = { ...(queryOptions.extraArgs ?? {}), name: opts.name };
 
   const q = query({ prompt: stream, options: queryOptions }) as any;
 
@@ -206,9 +208,13 @@ export async function startNew(
     status: "starting",
   };
   upsert(entry);
-  const rs = await startQuery({ sessionId, workingDirectory, resume: false });
+  const rs = await startQuery({
+    sessionId,
+    workingDirectory,
+    resume: false,
+    name: finalName,
+  });
   await rs.ready;
-  await applyName(sessionId, workingDirectory, finalName);
   return { ...entry, status: "running" };
 }
 

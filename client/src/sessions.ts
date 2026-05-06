@@ -113,6 +113,12 @@ async function startQuery(opts: {
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     settingSources: ["user", "project", "local"],
+    effort: (process.env.REASONING_EFFORT ?? "low") as
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max",
   };
   if (opts.resume) queryOptions.resume = opts.sessionId;
   else queryOptions.sessionId = opts.sessionId;

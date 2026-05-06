@@ -170,22 +170,41 @@ async function applyName(
   }
 }
 
+const ADJECTIVES = [
+  "amber", "brave", "calm", "clever", "cosmic", "crisp", "daring", "eager",
+  "fancy", "feral", "gentle", "happy", "jolly", "keen", "lively", "lucky",
+  "mellow", "merry", "nimble", "quiet", "quirky", "rapid", "shiny", "silver",
+  "snappy", "spry", "stellar", "sunny", "swift", "vivid", "witty", "zesty",
+];
+const NOUNS = [
+  "anchor", "arrow", "beacon", "breeze", "canyon", "cipher", "comet", "delta",
+  "dune", "ember", "falcon", "forge", "glade", "harbor", "jasper", "lantern",
+  "meadow", "mesa", "nebula", "orbit", "otter", "pebble", "pixel", "prism",
+  "quartz", "raven", "river", "shard", "spark", "tide", "vector", "willow",
+];
+function generateName(): string {
+  const a = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+  const n = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+  return `${a}-${n}`;
+}
+
 export async function startNew(
   workingDirectory: string,
   name?: string,
 ): Promise<TrackedSession> {
   const sessionId = randomUUID();
+  const finalName = name?.trim() || generateName();
   const entry: TrackedSession = {
     sessionId,
     workingDirectory,
-    name,
+    name: finalName,
     addedAt: new Date().toISOString(),
     status: "starting",
   };
   upsert(entry);
   const rs = await startQuery({ sessionId, workingDirectory, resume: false });
   await rs.ready;
-  await applyName(sessionId, workingDirectory, name);
+  await applyName(sessionId, workingDirectory, finalName);
   return { ...entry, status: "running" };
 }
 

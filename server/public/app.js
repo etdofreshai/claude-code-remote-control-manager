@@ -3,10 +3,9 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 let selected = null;
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { "content-type": "application/json" },
-    ...opts,
-  });
+  const headers = { ...(opts.headers ?? {}) };
+  if (opts.body != null) headers["content-type"] = "application/json";
+  const res = await fetch(path, { ...opts, headers });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.headers.get("content-type")?.includes("json") ? res.json() : res.text();
 }

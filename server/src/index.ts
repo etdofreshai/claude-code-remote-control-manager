@@ -212,13 +212,20 @@ app.post("/api/clients/:name/sessions/bind", async (req) => {
 
 app.delete("/api/clients/:name/sessions/:sessionId", async (req) => {
   const { name, sessionId } = req.params as { name: string; sessionId: string };
-  if (!agents.has(name)) throw new Error(`unknown client: ${name}`);
+  const agent = agents.get(name);
+  if (!agent) throw new Error(`unknown client: ${name}`);
+  const before = agent.sessions.length;
+  agent.sessions = agent.sessions.filter((s) => s.sessionId !== sessionId);
+  agents.set(name, { ...agent, lastSeenAt: agent.lastSeenAt });
   const cmd: AgentCommand = {
     id: randomUUID(),
     type: "remove",
     payload: { sessionId },
   };
-  return enqueue(name, cmd);
+  enqueue(name, cmd).catch(() => {
+    /* client may be offline; server-side cache is already updated */
+  });
+  return { removedFromServer: before !== agent.sessions.length, queued: true };
 });
 
 // --- Agent endpoints ---

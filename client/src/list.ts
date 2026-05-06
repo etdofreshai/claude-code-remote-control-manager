@@ -20,6 +20,38 @@ function projectKey(workingDirectory: string): string {
   return workingDirectory.replace(/\//g, "-");
 }
 
+export function readSessionTitle(
+  workingDirectory: string,
+  sessionId: string,
+): string | undefined {
+  const file = path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    projectKey(workingDirectory),
+    `${sessionId}.jsonl`,
+  );
+  if (!existsSync(file)) return undefined;
+  let title: string | undefined;
+  try {
+    const content = readFileSync(file, "utf8");
+    for (const line of content.split("\n")) {
+      if (!line) continue;
+      try {
+        const obj = JSON.parse(line);
+        if (obj?.type === "custom-title" && typeof obj.customTitle === "string") {
+          title = obj.customTitle;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return title;
+}
+
 function extractText(content: unknown): string | undefined {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {

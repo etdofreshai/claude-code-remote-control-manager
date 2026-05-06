@@ -1,6 +1,7 @@
 import { query, renameSession } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { load, save, type TrackedSession } from "./state.js";
+import { readSessionTitle } from "./list.js";
 
 interface RunningSession {
   sessionId: string;
@@ -268,10 +269,11 @@ export async function bindExisting(
       `bind requires a UUID session id; got "${sessionId}". Subagent or non-UUID ids cannot be resumed.`,
     );
   }
+  const resolvedName = name?.trim() || readSessionTitle(workingDirectory, sessionId);
   const entry: TrackedSession = {
     sessionId,
     workingDirectory,
-    name,
+    name: resolvedName,
     addedAt: new Date().toISOString(),
     status: "starting",
   };

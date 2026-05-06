@@ -208,6 +208,25 @@ export async function bindExisting(
   return { ...entry, status: "running" };
 }
 
+export async function renameTracked(
+  sessionId: string,
+  newName: string | undefined,
+): Promise<TrackedSession | null> {
+  const list = load();
+  const entry = list.find((s) => s.sessionId === sessionId);
+  if (!entry) return null;
+  if (newName) {
+    try {
+      await renameSession(sessionId, newName, { dir: entry.workingDirectory } as any);
+    } catch (err) {
+      console.error(`session ${sessionId}: rename failed`, err);
+      throw err;
+    }
+  }
+  patch(sessionId, { name: newName });
+  return { ...entry, name: newName };
+}
+
 export async function removeSession(sessionId: string): Promise<{ removed: boolean }> {
   const rs = running.get(sessionId);
   if (rs) {

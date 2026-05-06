@@ -3,6 +3,7 @@ import {
   startNew,
   bindExisting,
   removeSession,
+  renameTracked,
   listTracked,
   resumeAllTracked,
   setChangeListener,
@@ -57,7 +58,7 @@ async function pollOnce(): Promise<void> {
   if (!res.ok) throw new Error(`poll ${res.status}`);
   const cmd = (await res.json()) as {
     id: string;
-    type: "new" | "bind" | "remove";
+    type: "new" | "bind" | "remove" | "rename";
     payload: { workingDirectory?: string; sessionId?: string; name?: string };
   };
   console.log("received command", cmd.type, cmd.id);
@@ -77,6 +78,9 @@ async function pollOnce(): Promise<void> {
     } else if (cmd.type === "remove") {
       if (!cmd.payload.sessionId) throw new Error("sessionId required for remove");
       result = await removeSession(cmd.payload.sessionId);
+    } else if (cmd.type === "rename") {
+      if (!cmd.payload.sessionId) throw new Error("sessionId required for rename");
+      result = await renameTracked(cmd.payload.sessionId, cmd.payload.name);
     } else {
       throw new Error(`unknown command type: ${(cmd as any).type}`);
     }

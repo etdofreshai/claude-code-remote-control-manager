@@ -37,7 +37,7 @@ interface Agent {
 
 interface AgentCommand {
   id: string;
-  type: "new" | "bind" | "remove";
+  type: "new" | "bind" | "remove" | "rename";
   payload: { workingDirectory?: string; sessionId?: string; name?: string };
 }
 
@@ -206,6 +206,19 @@ app.post("/api/clients/:name/sessions/bind", async (req) => {
     id: randomUUID(),
     type: "bind",
     payload: { workingDirectory, sessionId, name: sessionName },
+  };
+  return enqueue(name, cmd);
+});
+
+app.post("/api/clients/:name/sessions/:sessionId/rename", async (req) => {
+  const { name, sessionId } = req.params as { name: string; sessionId: string };
+  const agent = agents.get(name);
+  if (!agent) throw new Error(`unknown client: ${name}`);
+  const { name: newName } = (req.body ?? {}) as { name?: string };
+  const cmd: AgentCommand = {
+    id: randomUUID(),
+    type: "rename",
+    payload: { sessionId, name: newName?.trim() || undefined },
   };
   return enqueue(name, cmd);
 });

@@ -60,13 +60,41 @@ function renderSessions(c) {
     const li = document.createElement("li");
     const title = s.name ? `<strong>${s.name}</strong><br>` : "";
     li.innerHTML = `<span>${title}<code>${s.sessionId}</code><br><small>${s.workingDirectory}</small><br><small>${s.status ?? "—"} · last ${fmtTime(s.lastMessageAt)}</small></span>`;
-    const btn = document.createElement("button");
-    btn.textContent = "Remove";
-    btn.className = "btn-danger";
-    btn.onclick = async (e) => {
+    const btns = document.createElement("div");
+    btns.className = "btn-stack";
+
+    const renameBtn = document.createElement("button");
+    renameBtn.textContent = "Rename";
+    renameBtn.className = "btn-secondary";
+    renameBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const newName = prompt(
+        `Rename session (leave blank to let Claude auto-name it):`,
+        s.name ?? "",
+      );
+      if (newName === null) return;
+      renameBtn.disabled = true;
+      try {
+        const r = await api(
+          `/api/clients/${encodeURIComponent(selected)}/sessions/${encodeURIComponent(s.sessionId)}/rename`,
+          { method: "POST", body: JSON.stringify({ name: newName }) },
+        );
+        showResult(JSON.stringify(r, null, 2));
+        loadClients();
+      } catch (err) {
+        showResult(String(err));
+      } finally {
+        renameBtn.disabled = false;
+      }
+    };
+
+    const removeBtn = document.createElement("button");
+    removeBtn.textContent = "Remove";
+    removeBtn.className = "btn-danger";
+    removeBtn.onclick = async (e) => {
       e.stopPropagation();
       if (!confirm(`Remove session ${s.sessionId}?`)) return;
-      btn.disabled = true;
+      removeBtn.disabled = true;
       try {
         const r = await api(
           `/api/clients/${encodeURIComponent(selected)}/sessions/${encodeURIComponent(s.sessionId)}`,
@@ -76,10 +104,13 @@ function renderSessions(c) {
         loadClients();
       } catch (err) {
         showResult(String(err));
-        btn.disabled = false;
+        removeBtn.disabled = false;
       }
     };
-    li.appendChild(btn);
+
+    btns.appendChild(renameBtn);
+    btns.appendChild(removeBtn);
+    li.appendChild(btns);
     ul.appendChild(li);
   }
 }

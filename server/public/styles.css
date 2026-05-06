@@ -26,6 +26,8 @@ li code { background: #0a0b0e; padding: 1px 4px; border-radius: 3px; }
 .btn-danger { background: transparent; border-color: #c53030; color: #fc8181; width: auto; padding: 4px 10px; margin-left: 8px; }
 .btn-danger:hover { background: #2a1212; }
 .btn-inline { width: auto; padding: 4px 10px; }
+.btn-stack { display: flex; flex-direction: column; gap: 4px; }
+.btn-stack button { width: auto; padding: 4px 10px; }
 .hidden { display: none; }
 li { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 pre { white-space: pre-wrap; word-break: break-word; background: #0a0b0e; border-radius: 6px; padding: 12px; max-height: 40vh; overflow: auto; }

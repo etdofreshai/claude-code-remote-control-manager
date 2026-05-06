@@ -11,6 +11,9 @@ interface RunningSession {
   ready: Promise<void>;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (s: string) => UUID_RE.test(s);
+
 const running = new Map<string, RunningSession>();
 let onChange: (() => void) | null = null;
 
@@ -132,6 +135,9 @@ async function startQuery(opts: {
     resolveReady = res;
     rejectReady = rej;
   });
+  // Attach a no-op handler so a rejected ready promise without an awaiter
+  // doesn't surface as an unhandled-rejection / process crash.
+  ready.catch(() => {});
 
   let enabled = false;
   const enable = async (reason: string) => {
@@ -257,6 +263,11 @@ export async function bindExisting(
   workingDirectory: string,
   name?: string,
 ): Promise<TrackedSession> {
+  if (!isUuid(sessionId)) {
+    throw new Error(
+      `bind requires a UUID session id; got "${sessionId}". Subagent or non-UUID ids cannot be resumed.`,
+    );
+  }
   const entry: TrackedSession = {
     sessionId,
     workingDirectory,
@@ -321,7 +332,14 @@ export async function removeSession(sessionId: string): Promise<{ removed: boole
 
 export async function resumeAllTracked(): Promise<void> {
   const list = load();
-  for (const entry of list) {
+  const valid = list.filter((s) => isUuid(s.sessionId));
+  if (valid.length !== list.length) {
+    console.warn(
+      `removing ${list.length - valid.length} non-UUID entries from tracked sessions`,
+    );
+    save(valid);
+  }
+  for (const entry of valid) {
     if (running.has(entry.sessionId)) continue;
     try {
       await startQuery({

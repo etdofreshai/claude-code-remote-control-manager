@@ -8,7 +8,7 @@
 <body>
   <header>
     <h1>Claude Code Remote</h1>
-    <button id="logout">Logout</button>
+    <button id="logout" class="btn-inline">Logout</button>
   </header>
 
   <main>
@@ -21,21 +21,31 @@
       <h2>Remote sessions <small id="selected-name"></small></h2>
       <ul id="sessions"></ul>
 
-      <div class="actions">
-        <form id="new-form">
-          <h3>Start new</h3>
-          <input name="workingDirectory" placeholder="/home/node/workspace/repos/foo" required>
-          <button>New session</button>
-        </form>
-        <form id="bind-form">
-          <h3>Bind existing</h3>
-          <input name="sessionId" placeholder="session id" required>
-          <input name="workingDirectory" placeholder="working directory" required>
-          <button>Bind</button>
-        </form>
+      <div class="toolbar">
+        <button id="show-new" class="btn-secondary">+ Start new</button>
+        <button id="show-bind" class="btn-secondary">+ Bind existing</button>
       </div>
 
-      <pre id="result">—</pre>
+      <form id="new-form" class="hidden">
+        <h3>Start new session</h3>
+        <input name="workingDirectory" placeholder="/home/node/workspace/repos/foo" required>
+        <div class="row">
+          <button>Create</button>
+          <button type="button" data-cancel class="btn-secondary">Cancel</button>
+        </div>
+      </form>
+
+      <form id="bind-form" class="hidden">
+        <h3>Bind existing session</h3>
+        <input name="sessionId" placeholder="session id" required>
+        <input name="workingDirectory" placeholder="working directory" required>
+        <div class="row">
+          <button>Bind</button>
+          <button type="button" data-cancel class="btn-secondary">Cancel</button>
+        </div>
+      </form>
+
+      <pre id="result" class="hidden">—</pre>
     </section>
   </main>
 

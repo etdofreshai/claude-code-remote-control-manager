@@ -1,58 +1,119 @@
-import Fastify from "fastify";
 import os from "node:os";
-import { createSession, connectSession, listSessions } from "./sessions.js";
+import {
+  startNew,
+  bindExisting,
+  listTracked,
+  resumeAllTracked,
+  setChangeListener,
+} from "./sessions.js";
 
-const CLIENT_TOKEN = process.env.CLIENT_TOKEN ?? "shared-token";
-const PORT = Number(process.env.PORT ?? 4000);
+const SERVER_URL = (process.env.SERVER_URL ?? "").replace(/\/+$/, "");
+const CLIENT_TOKEN = process.env.CLIENT_TOKEN ?? "";
+const AGENT_NAME = process.env.AGENT_NAME ?? os.hostname();
 
-const app = Fastify({ logger: true });
+if (!SERVER_URL) throw new Error("SERVER_URL required");
+if (!CLIENT_TOKEN) throw new Error("CLIENT_TOKEN required");
 
-app.addHook("preHandler", async (req, reply) => {
-  if (req.url === "/health") return;
-  const auth = req.headers.authorization ?? "";
-  const expected = `Bearer ${CLIENT_TOKEN}`;
-  if (auth !== expected) {
-    reply.code(401).send({ error: "unauthorized" });
-  }
-});
+const headers = {
+  "content-type": "application/json",
+  Authorization: `Bearer ${CLIENT_TOKEN}`,
+};
 
-app.get("/health", async () => ({
-  ok: true,
-  hostname: os.hostname(),
-  platform: process.platform,
-}));
-
-interface PromptBody {
-  workingDirectory: string;
-  prompt: string;
-  sessionId?: string;
+async function postJson(path: string, body: unknown) {
+  const res = await fetch(`${SERVER_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${path} ${res.status}: ${await res.text()}`);
+  return res.headers.get("content-type")?.includes("json") ? res.json() : null;
 }
 
-app.post("/session/create", async (req) => {
-  const { workingDirectory, prompt } = req.body as PromptBody;
-  if (!workingDirectory || !prompt) throw new Error("workingDirectory and prompt required");
-  return createSession(workingDirectory, prompt);
-});
-
-app.post("/session/connect", async (req) => {
-  const { sessionId, workingDirectory, prompt } = req.body as PromptBody;
-  if (!sessionId || !workingDirectory || !prompt) {
-    throw new Error("sessionId, workingDirectory and prompt required");
+async function reportSessions(): Promise<void> {
+  try {
+    await postJson("/api/agent/sessions", {
+      name: AGENT_NAME,
+      sessions: listTracked(),
+    });
+  } catch (err) {
+    console.error("reportSessions failed", err);
   }
-  return connectSession(sessionId, workingDirectory, prompt);
-});
+}
 
-app.post("/session/prompt", async (req) => {
-  const body = req.body as PromptBody;
-  if (body.sessionId) {
-    return connectSession(body.sessionId, body.workingDirectory, body.prompt);
+async function register(): Promise<void> {
+  await postJson("/api/agent/register", {
+    name: AGENT_NAME,
+    hostname: os.hostname(),
+    platform: process.platform,
+    sessions: listTracked(),
+  });
+}
+
+async function pollOnce(): Promise<void> {
+  const url = `${SERVER_URL}/api/agent/poll?name=${encodeURIComponent(AGENT_NAME)}`;
+  const res = await fetch(url, { headers });
+  if (res.status === 204) return;
+  if (!res.ok) throw new Error(`poll ${res.status}`);
+  const cmd = (await res.json()) as {
+    id: string;
+    type: "new" | "bind";
+    payload: { workingDirectory: string; sessionId?: string };
+  };
+  console.log("received command", cmd.type, cmd.id);
+  try {
+    let result;
+    if (cmd.type === "new") {
+      result = await startNew(cmd.payload.workingDirectory);
+    } else if (cmd.type === "bind") {
+      if (!cmd.payload.sessionId) throw new Error("sessionId required for bind");
+      result = await bindExisting(cmd.payload.sessionId, cmd.payload.workingDirectory);
+    } else {
+      throw new Error(`unknown command type: ${(cmd as any).type}`);
+    }
+    await postJson("/api/agent/ack", { id: cmd.id, result });
+    await reportSessions();
+  } catch (err) {
+    console.error(`command ${cmd.id} failed`, err);
+    await postJson("/api/agent/ack", { id: cmd.id, error: String(err) });
   }
-  return createSession(body.workingDirectory, body.prompt);
-});
+}
 
-app.get("/session/list", async () => listSessions());
+async function pollLoop(): Promise<void> {
+  while (true) {
+    try {
+      await pollOnce();
+    } catch (err) {
+      console.error("poll error", err);
+      await new Promise((r) => setTimeout(r, 5_000));
+    }
+  }
+}
 
-app.listen({ host: "0.0.0.0", port: PORT }).catch((err) => {
-  app.log.error(err);
+async function main(): Promise<void> {
+  setChangeListener(() => {
+    reportSessions().catch(() => {});
+  });
+
+  console.log(`registering as ${AGENT_NAME} -> ${SERVER_URL}`);
+  while (true) {
+    try {
+      await register();
+      break;
+    } catch (err) {
+      console.error("register failed, retrying in 5s", err);
+      await new Promise((r) => setTimeout(r, 5_000));
+    }
+  }
+
+  console.log("resuming tracked sessions...");
+  await resumeAllTracked();
+  await reportSessions();
+
+  console.log("polling for commands...");
+  await pollLoop();
+}
+
+main().catch((err) => {
+  console.error(err);
   process.exit(1);
 });

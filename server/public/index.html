@@ -12,38 +12,30 @@
   </header>
 
   <main>
-    <section class="panel">
+    <section class="panel" id="clients-panel">
       <h2>Clients</h2>
       <ul id="clients"></ul>
-      <form id="add-client">
-        <input name="name" placeholder="name" required>
-        <input name="baseUrl" placeholder="https://client.example" required>
-        <button>Add</button>
-      </form>
     </section>
 
-    <section class="panel">
-      <h2>Run prompt</h2>
-      <form id="prompt-form">
-        <label>Client
-          <select name="client" id="client-select" required></select>
-        </label>
-        <label>Working directory
-          <input name="workingDirectory" placeholder="/repos/project-a" required>
-        </label>
-        <label>Session ID (optional)
-          <input name="sessionId" placeholder="leave blank for new session">
-        </label>
-        <label>Prompt
-          <textarea name="prompt" rows="6" required></textarea>
-        </label>
-        <button>Send</button>
-      </form>
-    </section>
+    <section class="panel" id="sessions-panel">
+      <h2>Remote sessions <small id="selected-name"></small></h2>
+      <ul id="sessions"></ul>
 
-    <section class="panel">
-      <h2>Response</h2>
-      <pre id="response">—</pre>
+      <div class="actions">
+        <form id="new-form">
+          <h3>Start new</h3>
+          <input name="workingDirectory" placeholder="/home/node/workspace/repos/foo" required>
+          <button>New session</button>
+        </form>
+        <form id="bind-form">
+          <h3>Bind existing</h3>
+          <input name="sessionId" placeholder="session id" required>
+          <input name="workingDirectory" placeholder="working directory" required>
+          <button>Bind</button>
+        </form>
+      </div>
+
+      <pre id="result">—</pre>
     </section>
   </main>
 

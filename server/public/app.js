@@ -1,4 +1,5 @@
 const $ = (s) => document.querySelector(s);
+let selected = null;
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -9,69 +10,88 @@ async function api(path, opts = {}) {
   return res.headers.get("content-type")?.includes("json") ? res.json() : res.text();
 }
 
+function fmtTime(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString();
+}
+
 async function loadClients() {
   const list = await api("/api/clients");
   const ul = $("#clients");
-  const sel = $("#client-select");
   ul.innerHTML = "";
-  sel.innerHTML = "";
+  if (!list.length) {
+    ul.innerHTML = "<li class=empty>No clients connected.</li>";
+    return;
+  }
   for (const c of list) {
     const li = document.createElement("li");
-    const status = c.reachable ? "up" : c.reachable === false ? "down" : "";
-    li.innerHTML = `<span><span class="dot ${status}"></span>${c.name}<br><small>${c.baseUrl}</small></span>`;
-    const btn = document.createElement("button");
-    btn.textContent = "×";
-    btn.style.width = "auto";
-    btn.onclick = async () => {
-      await api(`/api/clients/${encodeURIComponent(c.name)}`, { method: "DELETE" });
+    li.className = c.name === selected ? "active" : "";
+    li.innerHTML = `<span><span class="dot ${c.online ? "up" : "down"}"></span>${c.name}<br><small>${c.hostname ?? ""} · ${c.sessions?.length ?? 0} sessions</small></span>`;
+    li.onclick = () => {
+      selected = c.name;
+      renderSessions(c);
       loadClients();
     };
-    li.appendChild(btn);
     ul.appendChild(li);
-
-    const opt = document.createElement("option");
-    opt.value = c.name;
-    opt.textContent = c.name;
-    sel.appendChild(opt);
+    if (selected === c.name) renderSessions(c);
+  }
+  if (!selected && list[0]) {
+    selected = list[0].name;
+    renderSessions(list[0]);
+    loadClients();
   }
 }
 
-$("#add-client").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const fd = new FormData(e.target);
-  await api("/api/clients", {
-    method: "POST",
-    body: JSON.stringify(Object.fromEntries(fd)),
-  });
-  e.target.reset();
-  loadClients();
-});
+function renderSessions(c) {
+  $("#selected-name").textContent = c ? `· ${c.name}` : "";
+  const ul = $("#sessions");
+  ul.innerHTML = "";
+  const sessions = (c?.sessions ?? [])
+    .slice()
+    .sort((a, b) => (b.lastMessageAt ?? b.addedAt).localeCompare(a.lastMessageAt ?? a.addedAt));
+  if (!sessions.length) {
+    ul.innerHTML = "<li class=empty>No remote sessions yet.</li>";
+    return;
+  }
+  for (const s of sessions) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span><code>${s.sessionId}</code><br><small>${s.workingDirectory}</small><br><small>last: ${fmtTime(s.lastMessageAt)}</small></span>`;
+    ul.appendChild(li);
+  }
+}
 
-$("#prompt-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const fd = Object.fromEntries(new FormData(e.target));
-  const name = fd.client;
-  const body = {
-    workingDirectory: fd.workingDirectory,
-    prompt: fd.prompt,
-  };
-  if (fd.sessionId) body.sessionId = fd.sessionId;
-  $("#response").textContent = "…running";
+async function send(form, route) {
+  if (!selected) {
+    alert("Select a client first.");
+    return;
+  }
+  const body = Object.fromEntries(new FormData(form));
+  $("#result").textContent = "…sending";
   try {
-    const r = await api(`/api/clients/${encodeURIComponent(name)}/prompt`, {
+    const r = await api(`/api/clients/${encodeURIComponent(selected)}/sessions/${route}`, {
       method: "POST",
       body: JSON.stringify(body),
     });
-    $("#response").textContent = JSON.stringify(r, null, 2);
-    if (r.sessionId) e.target.sessionId.value = r.sessionId;
+    $("#result").textContent = JSON.stringify(r, null, 2);
+    form.reset();
+    loadClients();
   } catch (err) {
-    $("#response").textContent = String(err);
+    $("#result").textContent = String(err);
   }
-});
+}
 
+$("#new-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  send(e.target, "new");
+});
+$("#bind-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  send(e.target, "bind");
+});
 $("#logout").addEventListener("click", async () => {
   await api("/api/logout", { method: "POST" });
   location.href = "/login";
 });
 
 loadClients();
+setInterval(loadClients, 5000);

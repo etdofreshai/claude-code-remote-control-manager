@@ -3,6 +3,7 @@ import fastifyStatic from "@fastify/static";
 import fastifyCookie from "@fastify/cookie";
 import fastifyFormbody from "@fastify/formbody";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as registry from "./clients.js";
 import type { ClientRecord, PromptRequest } from "./types.js";
@@ -80,8 +81,11 @@ app.post("/api/logout", async (_req, reply) => {
   reply.clearCookie(SESSION_COOKIE, { path: "/" }).send({ ok: true });
 });
 
+const PUBLIC_DIR = path.join(__dirname, "..", "public");
+const INDEX_HTML = readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
+
 app.get("/", async (_req, reply) => {
-  reply.sendFile("index.html");
+  reply.type("text/html").send(INDEX_HTML);
 });
 
 // --- Client registry ---

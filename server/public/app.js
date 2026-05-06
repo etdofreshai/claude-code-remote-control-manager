@@ -59,7 +59,8 @@ function renderSessions(c) {
   }
   for (const s of sessions) {
     const li = document.createElement("li");
-    li.innerHTML = `<span><code>${s.sessionId}</code><br><small>${s.workingDirectory}</small><br><small>${s.status ?? "—"} · last ${fmtTime(s.lastMessageAt)}</small></span>`;
+    const title = s.name ? `<strong>${s.name}</strong><br>` : "";
+    li.innerHTML = `<span>${title}<code>${s.sessionId}</code><br><small>${s.workingDirectory}</small><br><small>${s.status ?? "—"} · last ${fmtTime(s.lastMessageAt)}</small></span>`;
     const btn = document.createElement("button");
     btn.textContent = "Remove";
     btn.className = "btn-danger";
@@ -90,6 +91,7 @@ async function send(form, route) {
     return;
   }
   const body = Object.fromEntries(new FormData(form));
+  if (body.name === "") delete body.name;
   showResult("…sending");
   try {
     const r = await api(`/api/clients/${encodeURIComponent(selected)}/sessions/${route}`, {

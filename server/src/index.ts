@@ -38,7 +38,7 @@ interface Agent {
 interface AgentCommand {
   id: string;
   type: "new" | "bind" | "remove";
-  payload: { workingDirectory?: string; sessionId?: string };
+  payload: { workingDirectory?: string; sessionId?: string; name?: string };
 }
 
 const agents = new Map<string, Agent>();
@@ -179,12 +179,15 @@ app.get("/api/clients", async () => {
 app.post("/api/clients/:name/sessions/new", async (req) => {
   const { name } = req.params as { name: string };
   if (!agents.has(name)) throw new Error(`unknown client: ${name}`);
-  const { workingDirectory } = req.body as { workingDirectory: string };
+  const { workingDirectory, name } = req.body as {
+    workingDirectory: string;
+    name?: string;
+  };
   if (!workingDirectory) throw new Error("workingDirectory required");
   const cmd: AgentCommand = {
     id: randomUUID(),
     type: "new",
-    payload: { workingDirectory },
+    payload: { workingDirectory, name },
   };
   return enqueue(name, cmd);
 });
@@ -192,16 +195,17 @@ app.post("/api/clients/:name/sessions/new", async (req) => {
 app.post("/api/clients/:name/sessions/bind", async (req) => {
   const { name } = req.params as { name: string };
   if (!agents.has(name)) throw new Error(`unknown client: ${name}`);
-  const { workingDirectory, sessionId } = req.body as {
+  const { workingDirectory, sessionId, name } = req.body as {
     workingDirectory: string;
     sessionId: string;
+    name?: string;
   };
   if (!workingDirectory || !sessionId)
     throw new Error("workingDirectory and sessionId required");
   const cmd: AgentCommand = {
     id: randomUUID(),
     type: "bind",
-    payload: { workingDirectory, sessionId },
+    payload: { workingDirectory, sessionId, name },
   };
   return enqueue(name, cmd);
 });

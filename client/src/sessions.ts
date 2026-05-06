@@ -1,4 +1,4 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { query, renameSession } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { load, save, type TrackedSession } from "./state.js";
 
@@ -156,33 +156,55 @@ async function startQuery(opts: {
   return rs;
 }
 
-export async function startNew(workingDirectory: string): Promise<TrackedSession> {
+async function applyName(
+  sessionId: string,
+  workingDirectory: string,
+  name: string | undefined,
+): Promise<void> {
+  if (!name) return;
+  try {
+    await renameSession(sessionId, name, { dir: workingDirectory } as any);
+    patch(sessionId, { name });
+  } catch (err) {
+    console.error(`session ${sessionId}: rename failed`, err);
+  }
+}
+
+export async function startNew(
+  workingDirectory: string,
+  name?: string,
+): Promise<TrackedSession> {
   const sessionId = randomUUID();
   const entry: TrackedSession = {
     sessionId,
     workingDirectory,
+    name,
     addedAt: new Date().toISOString(),
     status: "starting",
   };
   upsert(entry);
   const rs = await startQuery({ sessionId, workingDirectory, resume: false });
   await rs.ready;
+  await applyName(sessionId, workingDirectory, name);
   return { ...entry, status: "running" };
 }
 
 export async function bindExisting(
   sessionId: string,
   workingDirectory: string,
+  name?: string,
 ): Promise<TrackedSession> {
   const entry: TrackedSession = {
     sessionId,
     workingDirectory,
+    name,
     addedAt: new Date().toISOString(),
     status: "starting",
   };
   upsert(entry);
   const rs = await startQuery({ sessionId, workingDirectory, resume: true });
   await rs.ready;
+  await applyName(sessionId, workingDirectory, name);
   return { ...entry, status: "running" };
 }
 

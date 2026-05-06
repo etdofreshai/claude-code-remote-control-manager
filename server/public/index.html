@@ -28,6 +28,7 @@
 
       <form id="new-form" class="hidden">
         <h3>Start new session</h3>
+        <input name="name" placeholder="name (optional)">
         <input name="workingDirectory" placeholder="/home/node/workspace/repos/foo" required>
         <div class="row">
           <button>Create</button>
@@ -37,6 +38,7 @@
 
       <form id="bind-form" class="hidden">
         <h3>Bind existing session</h3>
+        <input name="name" placeholder="name (optional)">
         <input name="sessionId" placeholder="session id" required>
         <input name="workingDirectory" placeholder="working directory" required>
         <div class="row">

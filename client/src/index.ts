@@ -58,18 +58,22 @@ async function pollOnce(): Promise<void> {
   const cmd = (await res.json()) as {
     id: string;
     type: "new" | "bind" | "remove";
-    payload: { workingDirectory?: string; sessionId?: string };
+    payload: { workingDirectory?: string; sessionId?: string; name?: string };
   };
   console.log("received command", cmd.type, cmd.id);
   try {
     let result;
     if (cmd.type === "new") {
       if (!cmd.payload.workingDirectory) throw new Error("workingDirectory required");
-      result = await startNew(cmd.payload.workingDirectory);
+      result = await startNew(cmd.payload.workingDirectory, cmd.payload.name);
     } else if (cmd.type === "bind") {
       if (!cmd.payload.sessionId || !cmd.payload.workingDirectory)
         throw new Error("sessionId and workingDirectory required for bind");
-      result = await bindExisting(cmd.payload.sessionId, cmd.payload.workingDirectory);
+      result = await bindExisting(
+        cmd.payload.sessionId,
+        cmd.payload.workingDirectory,
+        cmd.payload.name,
+      );
     } else if (cmd.type === "remove") {
       if (!cmd.payload.sessionId) throw new Error("sessionId required for remove");
       result = await removeSession(cmd.payload.sessionId);

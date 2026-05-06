@@ -5,6 +5,7 @@ import os from "node:os";
 export interface TrackedSession {
   sessionId: string;
   workingDirectory: string;
+  name?: string;
   addedAt: string;
   lastMessageAt?: string;
   status?: "starting" | "running" | "errored" | "stopped";

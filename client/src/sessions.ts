@@ -280,12 +280,15 @@ export async function bindExisting(
     status: "starting",
   };
   upsert(entry);
-  // Don't push the name through the SDK on bind — only stored locally for
-  // our UI. Resuming + renameSession concurrently has caused hangs; the
-  // session keeps whatever title it already had on disk.
-  startQuery({ sessionId, workingDirectory, resume: true }).catch((err) =>
-    console.error(`bindExisting ${sessionId} failed`, err),
-  );
+  // Pass the name via extraArgs.name so the resumed CLI process picks it
+  // up at startup — same mechanism as brand-new sessions, no concurrent
+  // renameSession() that contended with the transcript file lock.
+  startQuery({
+    sessionId,
+    workingDirectory,
+    resume: true,
+    name: resolvedName,
+  }).catch((err) => console.error(`bindExisting ${sessionId} failed`, err));
   return { ...entry };
 }
 

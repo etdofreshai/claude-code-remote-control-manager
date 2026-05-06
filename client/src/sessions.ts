@@ -290,26 +290,42 @@ export async function bindExisting(
 export async function renameTracked(
   sessionId: string,
   newName: string | undefined,
-): Promise<TrackedSession & { sdkRename: "ok" | "timeout" | "error" | "skipped" }> {
+): Promise<TrackedSession & { sdkRename: "ok" | "error" | "skipped" }> {
   const list = load();
   const entry = list.find((s) => s.sessionId === sessionId);
   if (!entry) throw new Error(`session ${sessionId} not tracked`);
-  let sdkRename: "ok" | "timeout" | "error" | "skipped" = "skipped";
+
+  // To rename reliably we need exclusive access to the session's transcript
+  // file. Stop the running query, run renameSession, then resume.
+  const rs = running.get(sessionId);
+  if (rs) {
+    try {
+      rs.abort.abort();
+    } catch {}
+    rs.close();
+    running.delete(sessionId);
+    // Brief settle so the SDK's child process releases the file.
+    await new Promise((r) => setTimeout(r, 250));
+  }
+
+  let sdkRename: "ok" | "error" | "skipped" = "skipped";
   if (newName) {
     try {
-      await Promise.race([
-        renameSession(sessionId, newName, { dir: entry.workingDirectory } as any),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("renameSession timed out")), 10_000),
-        ),
-      ]);
+      await renameSession(sessionId, newName, { dir: entry.workingDirectory } as any);
       sdkRename = "ok";
     } catch (err) {
       console.error(`session ${sessionId}: SDK rename failed`, err);
-      sdkRename = String(err).includes("timed out") ? "timeout" : "error";
+      sdkRename = "error";
     }
   }
+
   patch(sessionId, { name: newName });
+
+  // Restart the resumed query so remote control comes back online.
+  startQuery({ sessionId, workingDirectory: entry.workingDirectory, resume: true }).catch(
+    (err) => console.error(`renameTracked ${sessionId}: restart failed`, err),
+  );
+
   return { ...entry, name: newName, sdkRename };
 }
 

@@ -17,7 +17,10 @@ export interface SessionListResult {
 }
 
 function projectKey(workingDirectory: string): string {
-  return workingDirectory.replace(/\//g, "-");
+  // Claude Code stores transcripts under ~/.claude/projects/<key>/ where
+  // <key> is the absolute path with path separators (and Windows drive
+  // colons) flattened to "-". Handle both POSIX and Windows paths.
+  return workingDirectory.replace(/[\\/:]/g, "-");
 }
 
 export function readSessionTitle(

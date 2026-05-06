@@ -222,14 +222,13 @@ export async function startNew(
     status: "starting",
   };
   upsert(entry);
-  const rs = await startQuery({
+  startQuery({
     sessionId,
     workingDirectory,
     resume: false,
     name: finalName,
-  });
-  await rs.ready;
-  return { ...entry, status: "running" };
+  }).catch((err) => console.error(`startNew ${sessionId} failed`, err));
+  return { ...entry };
 }
 
 export async function bindExisting(
@@ -245,10 +244,17 @@ export async function bindExisting(
     status: "starting",
   };
   upsert(entry);
-  const rs = await startQuery({ sessionId, workingDirectory, resume: true });
-  await rs.ready;
-  await applyName(sessionId, workingDirectory, name);
-  return { ...entry, status: "running" };
+  startQuery({ sessionId, workingDirectory, resume: true })
+    .then(async (rs) => {
+      try {
+        await rs.ready;
+        await applyName(sessionId, workingDirectory, name);
+      } catch (err) {
+        console.error(`bindExisting ${sessionId} init/rename failed`, err);
+      }
+    })
+    .catch((err) => console.error(`bindExisting ${sessionId} failed`, err));
+  return { ...entry };
 }
 
 export async function renameTracked(

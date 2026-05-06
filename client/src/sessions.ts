@@ -10,6 +10,7 @@ interface RunningSession {
   push: (msg: any) => void;
   close: () => void;
   ready: Promise<void>;
+  query: any;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -199,6 +200,7 @@ async function startQuery(opts: {
     push,
     close,
     ready,
+    query: q,
   };
   running.set(opts.sessionId, rs);
   return rs;
@@ -346,6 +348,30 @@ export async function removeSession(sessionId: string): Promise<{ removed: boole
     notify();
   }
   return { removed };
+}
+
+export async function shutdownAll(timeoutMs = 5000): Promise<void> {
+  const sessions = [...running.values()];
+  if (!sessions.length) return;
+  console.log(`shutdown: gracefully disconnecting ${sessions.length} sessions...`);
+  await Promise.race([
+    Promise.all(
+      sessions.map(async (rs) => {
+        try {
+          await rs.query.enableRemoteControl(false);
+        } catch (err) {
+          console.error(`shutdown ${rs.sessionId}: disable failed`, err);
+        }
+        try {
+          rs.abort.abort();
+        } catch {}
+        rs.close();
+      }),
+    ),
+    new Promise((r) => setTimeout(r, timeoutMs)),
+  ]);
+  running.clear();
+  console.log("shutdown: done");
 }
 
 export async function resumeAllTracked(): Promise<void> {

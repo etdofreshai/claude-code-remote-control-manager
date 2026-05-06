@@ -6,6 +6,7 @@ import {
   renameTracked,
   listTracked,
   resumeAllTracked,
+  shutdownAll,
   setChangeListener,
 } from "./sessions.js";
 import { listLocalSessions } from "./list.js";
@@ -147,6 +148,20 @@ async function main(): Promise<void> {
   console.log("polling for commands...");
   await pollLoop();
 }
+
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`received ${signal}, shutting down...`);
+  try {
+    await shutdownAll();
+  } finally {
+    process.exit(0);
+  }
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
 
 main().catch((err) => {
   console.error(err);

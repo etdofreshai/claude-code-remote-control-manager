@@ -1,6 +1,7 @@
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 let selected = null;
+let lastFilledForClient = null;
 
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers ?? {}) };
@@ -50,7 +51,12 @@ function renderSessions(c) {
   const def = c?.defaultWorkingDirectory ?? "";
   for (const inp of document.querySelectorAll('input[name="workingDirectory"]')) {
     inp.placeholder = def || "/home/node/workspace/repos/foo";
-    if (!inp.value) inp.value = def;
+  }
+  if (c && lastFilledForClient !== c.name) {
+    for (const inp of document.querySelectorAll('input[name="workingDirectory"]')) {
+      inp.value = def;
+    }
+    lastFilledForClient = c.name;
   }
   const ul = $("#sessions");
   ul.innerHTML = "";

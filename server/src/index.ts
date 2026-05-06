@@ -69,6 +69,40 @@ function savePrefs(): void {
 
 loadPrefs();
 
+// --- agent state persistence (sessions cache, defaults, last-seen) ---
+const AGENTS_PATH = process.env.AGENTS_PATH ?? "/app/data/agents.json";
+
+function loadAgents(): void {
+  try {
+    if (!existsSync(AGENTS_PATH)) return;
+    const data = JSON.parse(readFileSync(AGENTS_PATH, "utf8")) as Agent[];
+    for (const a of data) {
+      // Merge stored prefix from prefs file (authoritative).
+      const merged: Agent = { ...a, prefix: prefixes.get(a.name) ?? a.prefix };
+      agents.set(a.name, merged);
+    }
+    console.log(`loaded ${agents.size} agents from ${AGENTS_PATH}`);
+  } catch (err) {
+    console.error("loadAgents failed", err);
+  }
+}
+
+let saveAgentsTimer: NodeJS.Timeout | null = null;
+function saveAgents(): void {
+  if (saveAgentsTimer) return;
+  saveAgentsTimer = setTimeout(() => {
+    saveAgentsTimer = null;
+    try {
+      mkdirSync(path.dirname(AGENTS_PATH), { recursive: true });
+      writeFileSync(AGENTS_PATH, JSON.stringify([...agents.values()], null, 2));
+    } catch (err) {
+      console.error("saveAgents failed", err);
+    }
+  }, 500); // debounce: many writes happen close together
+}
+
+loadAgents();
+
 interface AgentCommand {
   id: string;
   type: "new" | "bind" | "remove" | "rename" | "list";
@@ -105,6 +139,7 @@ function touchAgent(name: string, info: Partial<Agent> = {}): Agent {
     sessions: info.sessions ?? prev?.sessions ?? [],
   };
   agents.set(name, a);
+  saveAgents();
   return a;
 }
 
@@ -264,6 +299,7 @@ app.post("/api/clients/:name/prefix", async (req) => {
   prefixes.set(name, next);
   savePrefs();
   agents.set(name, { ...agent, prefix: next });
+  saveAgents();
   return { name, prefix: next };
 });
 
@@ -316,6 +352,7 @@ app.delete("/api/clients/:name/sessions/:sessionId", async (req) => {
   const before = agent.sessions.length;
   agent.sessions = agent.sessions.filter((s) => s.sessionId !== sessionId);
   agents.set(name, { ...agent, lastSeenAt: agent.lastSeenAt });
+  saveAgents();
   const cmd: AgentCommand = {
     id: randomUUID(),
     type: "remove",

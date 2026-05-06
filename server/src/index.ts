@@ -179,7 +179,7 @@ app.get("/api/clients", async () => {
 app.post("/api/clients/:name/sessions/new", async (req) => {
   const { name } = req.params as { name: string };
   if (!agents.has(name)) throw new Error(`unknown client: ${name}`);
-  const { workingDirectory, name } = req.body as {
+  const { workingDirectory, name: sessionName } = req.body as {
     workingDirectory: string;
     name?: string;
   };
@@ -187,7 +187,7 @@ app.post("/api/clients/:name/sessions/new", async (req) => {
   const cmd: AgentCommand = {
     id: randomUUID(),
     type: "new",
-    payload: { workingDirectory, name },
+    payload: { workingDirectory, name: sessionName },
   };
   return enqueue(name, cmd);
 });
@@ -195,7 +195,7 @@ app.post("/api/clients/:name/sessions/new", async (req) => {
 app.post("/api/clients/:name/sessions/bind", async (req) => {
   const { name } = req.params as { name: string };
   if (!agents.has(name)) throw new Error(`unknown client: ${name}`);
-  const { workingDirectory, sessionId, name } = req.body as {
+  const { workingDirectory, sessionId, name: sessionName } = req.body as {
     workingDirectory: string;
     sessionId: string;
     name?: string;
@@ -205,7 +205,7 @@ app.post("/api/clients/:name/sessions/bind", async (req) => {
   const cmd: AgentCommand = {
     id: randomUUID(),
     type: "bind",
-    payload: { workingDirectory, sessionId, name },
+    payload: { workingDirectory, sessionId, name: sessionName },
   };
   return enqueue(name, cmd);
 });

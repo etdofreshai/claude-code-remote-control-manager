@@ -175,6 +175,8 @@ $("#bind-form").addEventListener("submit", (e) => {
 });
 
 let browsePage = 0;
+let browseQuery = "";
+let browseSearchTimer = null;
 const PAGE_SIZE = 20;
 
 async function loadBrowsePage() {
@@ -189,11 +191,18 @@ async function loadBrowsePage() {
   try {
     const r = await api(`/api/clients/${encodeURIComponent(selected)}/list`, {
       method: "POST",
-      body: JSON.stringify({ workingDirectory: wd, page: browsePage, pageSize: PAGE_SIZE }),
+      body: JSON.stringify({
+        workingDirectory: wd,
+        page: browsePage,
+        pageSize: PAGE_SIZE,
+        query: browseQuery || undefined,
+      }),
     });
     const total = r.total ?? 0;
     const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    $("#session-browser-title").textContent = `${total} session${total === 1 ? "" : "s"} in ${wd}`;
+    const matchSuffix = browseQuery ? ` matching "${browseQuery}"` : "";
+    $("#session-browser-title").textContent =
+      `${total} session${total === 1 ? "" : "s"}${matchSuffix} in ${wd}`;
     const ul = $("#session-browser-list");
     ul.innerHTML = "";
     if (!r.items?.length) {
@@ -202,12 +211,48 @@ async function loadBrowsePage() {
     for (const s of r.items ?? []) {
       const li = document.createElement("li");
       const label = s.title || s.lastText || "(no preview)";
-      li.innerHTML = `<div><strong>${label.replace(/</g, "&lt;")}</strong></div><div><small><code>${s.sessionId}</code> · ${fmtTime(s.lastMessageAt)}</small></div>`;
-      li.onclick = () => {
+      const left = document.createElement("div");
+      left.innerHTML = `<div><strong>${label.replace(/</g, "&lt;")}</strong></div><div><small><code>${s.sessionId}</code> · ${fmtTime(s.lastMessageAt)}</small></div>`;
+      left.style.flex = "1";
+      left.style.cursor = "pointer";
+      left.onclick = () => {
         $("#bind-form input[name='sessionId']").value = s.sessionId;
         $("#session-browser").classList.add("hidden");
         $("#bind-form").requestSubmit();
       };
+
+      const renameBtn = document.createElement("button");
+      renameBtn.type = "button";
+      renameBtn.textContent = "Rename";
+      renameBtn.className = "btn-secondary btn-inline";
+      renameBtn.onclick = async (e) => {
+        e.stopPropagation();
+        const newName = prompt(
+          "Rename session (blank = let Claude auto-name):",
+          s.title ?? "",
+        );
+        if (newName === null) return;
+        renameBtn.disabled = true;
+        try {
+          await api(
+            `/api/clients/${encodeURIComponent(selected)}/sessions/${encodeURIComponent(s.sessionId)}/rename`,
+            {
+              method: "POST",
+              body: JSON.stringify({ name: newName, workingDirectory: wd }),
+            },
+          );
+          loadBrowsePage();
+        } catch (err) {
+          alert(String(err));
+          renameBtn.disabled = false;
+        }
+      };
+
+      li.style.display = "flex";
+      li.style.gap = "8px";
+      li.style.alignItems = "flex-start";
+      li.appendChild(left);
+      li.appendChild(renameBtn);
       ul.appendChild(li);
     }
     $("#browse-page-label").textContent = `Page ${browsePage + 1} / ${totalPages}`;
@@ -220,8 +265,18 @@ async function loadBrowsePage() {
 
 $("#browse-sessions").addEventListener("click", () => {
   browsePage = 0;
+  browseQuery = "";
+  $("#browse-search").value = "";
   $("#session-browser").classList.remove("hidden");
   loadBrowsePage();
+});
+$("#browse-search").addEventListener("input", (e) => {
+  clearTimeout(browseSearchTimer);
+  browseSearchTimer = setTimeout(() => {
+    browseQuery = e.target.value.trim();
+    browsePage = 0;
+    loadBrowsePage();
+  }, 250);
 });
 $("#browse-close").addEventListener("click", () => {
   $("#session-browser").classList.add("hidden");

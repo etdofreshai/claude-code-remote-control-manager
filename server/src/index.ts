@@ -45,6 +45,7 @@ interface AgentCommand {
     name?: string;
     page?: number;
     pageSize?: number;
+    query?: string;
   };
 }
 
@@ -226,11 +227,17 @@ app.post("/api/clients/:name/list", async (req) => {
     workingDirectory,
     page = 0,
     pageSize = 20,
-  } = (req.body ?? {}) as { workingDirectory?: string; page?: number; pageSize?: number };
+    query,
+  } = (req.body ?? {}) as {
+    workingDirectory?: string;
+    page?: number;
+    pageSize?: number;
+    query?: string;
+  };
   const cmd: AgentCommand = {
     id: randomUUID(),
     type: "list",
-    payload: { workingDirectory, page, pageSize } as any,
+    payload: { workingDirectory, page, pageSize, query } as any,
   };
   return enqueue(name, cmd);
 });
@@ -239,11 +246,18 @@ app.post("/api/clients/:name/sessions/:sessionId/rename", async (req) => {
   const { name, sessionId } = req.params as { name: string; sessionId: string };
   const agent = agents.get(name);
   if (!agent) throw new Error(`unknown client: ${name}`);
-  const { name: newName } = (req.body ?? {}) as { name?: string };
+  const { name: newName, workingDirectory } = (req.body ?? {}) as {
+    name?: string;
+    workingDirectory?: string;
+  };
   const cmd: AgentCommand = {
     id: randomUUID(),
     type: "rename",
-    payload: { sessionId, name: newName?.trim() || undefined },
+    payload: {
+      sessionId,
+      name: newName?.trim() || undefined,
+      workingDirectory,
+    },
   };
   return enqueue(name, cmd);
 });

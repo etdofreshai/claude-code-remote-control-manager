@@ -105,6 +105,7 @@ export function listLocalSessions(
   workingDirectory: string,
   page: number,
   pageSize: number,
+  query?: string,
 ): SessionListResult {
   const dir = path.join(os.homedir(), ".claude", "projects", projectKey(workingDirectory));
   if (!existsSync(dir)) return { items: [], page, pageSize, total: 0 };
@@ -112,7 +113,16 @@ export function listLocalSessions(
   const files = readdirSync(dir).filter(
     (f) => f.endsWith(".jsonl") && UUID_RE.test(f.replace(/\.jsonl$/, "")),
   );
-  const all = files.map((f) => readSession(path.join(dir, f), f.replace(/\.jsonl$/, "")));
+  let all = files.map((f) => readSession(path.join(dir, f), f.replace(/\.jsonl$/, "")));
+  const q = query?.trim().toLowerCase();
+  if (q) {
+    all = all.filter(
+      (s) =>
+        s.sessionId.toLowerCase().includes(q) ||
+        (s.title?.toLowerCase().includes(q) ?? false) ||
+        (s.lastText?.toLowerCase().includes(q) ?? false),
+    );
+  }
   all.sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
   const start = page * pageSize;
   return { items: all.slice(start, start + pageSize), page, pageSize, total: all.length };

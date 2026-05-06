@@ -4,6 +4,7 @@ import {
   bindExisting,
   removeSession,
   renameTracked,
+  renameAny,
   listTracked,
   resumeAllTracked,
   shutdownAll,
@@ -69,6 +70,7 @@ async function pollOnce(): Promise<void> {
       name?: string;
       page?: number;
       pageSize?: number;
+      query?: string;
     };
   };
   console.log("received command", cmd.type, cmd.id);
@@ -90,7 +92,12 @@ async function pollOnce(): Promise<void> {
       result = await removeSession(cmd.payload.sessionId);
     } else if (cmd.type === "rename") {
       if (!cmd.payload.sessionId) throw new Error("sessionId required for rename");
-      result = await renameTracked(cmd.payload.sessionId, cmd.payload.name);
+      // Use renameAny which handles both tracked and untracked sessions.
+      result = await renameAny(
+        cmd.payload.sessionId,
+        cmd.payload.name,
+        cmd.payload.workingDirectory,
+      );
     } else if (cmd.type === "list") {
       if (!cmd.payload.workingDirectory)
         throw new Error("workingDirectory required for list");
@@ -98,6 +105,7 @@ async function pollOnce(): Promise<void> {
         cmd.payload.workingDirectory,
         cmd.payload.page ?? 0,
         cmd.payload.pageSize ?? 20,
+        cmd.payload.query,
       );
     } else {
       throw new Error(`unknown command type: ${(cmd as any).type}`);

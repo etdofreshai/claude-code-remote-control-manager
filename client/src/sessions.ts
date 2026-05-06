@@ -289,6 +289,50 @@ export async function bindExisting(
   return { ...entry };
 }
 
+export async function renameAny(
+  sessionId: string,
+  newName: string | undefined,
+  workingDirectoryHint?: string,
+): Promise<{ sdkRename: "ok" | "error" | "skipped"; tracked: boolean }> {
+  if (!isUuid(sessionId)) throw new Error(`invalid session id: ${sessionId}`);
+  const list = load();
+  const tracked = list.find((s) => s.sessionId === sessionId);
+  const workingDirectory = tracked?.workingDirectory ?? workingDirectoryHint;
+  if (!workingDirectory) throw new Error("workingDirectory required for untracked rename");
+
+  // If running locally, stop first to release the transcript file.
+  const rs = running.get(sessionId);
+  if (rs) {
+    try {
+      rs.abort.abort();
+    } catch {}
+    rs.close();
+    running.delete(sessionId);
+    await new Promise((r) => setTimeout(r, 250));
+  }
+
+  let sdkRename: "ok" | "error" | "skipped" = "skipped";
+  if (newName?.trim()) {
+    try {
+      await renameSession(sessionId, newName.trim(), { dir: workingDirectory } as any);
+      sdkRename = "ok";
+    } catch (err) {
+      console.error(`session ${sessionId}: SDK rename failed`, err);
+      sdkRename = "error";
+    }
+  }
+
+  if (tracked) {
+    patch(sessionId, { name: newName?.trim() || undefined });
+    // Restart the resumed query so remote control comes back online.
+    startQuery({ sessionId, workingDirectory, resume: true }).catch((err) =>
+      console.error(`renameAny ${sessionId}: restart failed`, err),
+    );
+  }
+
+  return { sdkRename, tracked: !!tracked };
+}
+
 export async function renameTracked(
   sessionId: string,
   newName: string | undefined,

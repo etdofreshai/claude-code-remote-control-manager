@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Claude Code Remote</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header>
+    <h1>Claude Code Remote</h1>
+    <button id="logout">Logout</button>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>Clients</h2>
+      <ul id="clients"></ul>
+      <form id="add-client">
+        <input name="name" placeholder="name" required>
+        <input name="baseUrl" placeholder="https://client.example" required>
+        <button>Add</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Run prompt</h2>
+      <form id="prompt-form">
+        <label>Client
+          <select name="client" id="client-select" required></select>
+        </label>
+        <label>Working directory
+          <input name="workingDirectory" placeholder="/repos/project-a" required>
+        </label>
+        <label>Session ID (optional)
+          <input name="sessionId" placeholder="leave blank for new session">
+        </label>
+        <label>Prompt
+          <textarea name="prompt" rows="6" required></textarea>
+        </label>
+        <button>Send</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Response</h2>
+      <pre id="response">—</pre>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

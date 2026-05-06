@@ -1,5 +1,6 @@
 import { query, renameSession } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
+import os from "node:os";
 import { load, save, type TrackedSession } from "./state.js";
 import { readSessionTitle } from "./list.js";
 
@@ -86,9 +87,9 @@ function createMessageStream() {
 
 function bootstrapMessage(): any {
   const serverUrl = process.env.SERVER_URL ?? "";
-  const text = serverUrl
-    ? `Session started from ${serverUrl}. No reply needed.`
-    : "Session started from claude-code-remote-control-manager. No reply needed.";
+  const host = process.env.AGENT_NAME?.trim() || os.hostname();
+  const origin = serverUrl || "claude-code-remote-control-manager";
+  const text = `Session started from ${origin} on host ${host}. No reply needed.`;
   return {
     type: "user",
     message: { role: "user", content: text },

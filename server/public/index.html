@@ -39,8 +39,23 @@
       <form id="bind-form" class="hidden">
         <h3>Bind existing session</h3>
         <input name="name" placeholder="name (optional)">
-        <input name="sessionId" placeholder="session id" required>
         <input name="workingDirectory" placeholder="working directory" required>
+        <div class="input-with-action">
+          <input name="sessionId" placeholder="session id" required>
+          <button type="button" id="browse-sessions" class="btn-secondary btn-inline">Browse…</button>
+        </div>
+        <div id="session-browser" class="session-browser hidden">
+          <div class="session-browser-header">
+            <span id="session-browser-title">Loading…</span>
+            <button type="button" id="browse-close" class="btn-secondary btn-inline">×</button>
+          </div>
+          <ul id="session-browser-list"></ul>
+          <div class="session-browser-footer">
+            <button type="button" id="browse-prev" class="btn-secondary btn-inline">◀ Prev</button>
+            <span id="browse-page-label"></span>
+            <button type="button" id="browse-next" class="btn-secondary btn-inline">Next ▶</button>
+          </div>
+        </div>
         <div class="row">
           <button>Bind</button>
           <button type="button" data-cancel class="btn-secondary">Cancel</button>

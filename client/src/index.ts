@@ -8,6 +8,7 @@ import {
   resumeAllTracked,
   setChangeListener,
 } from "./sessions.js";
+import { listLocalSessions } from "./list.js";
 
 const SERVER_URL = (process.env.SERVER_URL ?? "").replace(/\/+$/, "");
 const CLIENT_TOKEN = process.env.CLIENT_TOKEN ?? "";
@@ -60,8 +61,14 @@ async function pollOnce(): Promise<void> {
   if (!res.ok) throw new Error(`poll ${res.status}`);
   const cmd = (await res.json()) as {
     id: string;
-    type: "new" | "bind" | "remove" | "rename";
-    payload: { workingDirectory?: string; sessionId?: string; name?: string };
+    type: "new" | "bind" | "remove" | "rename" | "list";
+    payload: {
+      workingDirectory?: string;
+      sessionId?: string;
+      name?: string;
+      page?: number;
+      pageSize?: number;
+    };
   };
   console.log("received command", cmd.type, cmd.id);
   try {
@@ -83,6 +90,14 @@ async function pollOnce(): Promise<void> {
     } else if (cmd.type === "rename") {
       if (!cmd.payload.sessionId) throw new Error("sessionId required for rename");
       result = await renameTracked(cmd.payload.sessionId, cmd.payload.name);
+    } else if (cmd.type === "list") {
+      if (!cmd.payload.workingDirectory)
+        throw new Error("workingDirectory required for list");
+      result = listLocalSessions(
+        cmd.payload.workingDirectory,
+        cmd.payload.page ?? 0,
+        cmd.payload.pageSize ?? 20,
+      );
     } else {
       throw new Error(`unknown command type: ${(cmd as any).type}`);
     }

@@ -163,6 +163,68 @@ $("#bind-form").addEventListener("submit", (e) => {
   e.preventDefault();
   send(e.target, "bind");
 });
+
+let browsePage = 0;
+const PAGE_SIZE = 20;
+
+async function loadBrowsePage() {
+  const wd = $("#bind-form input[name='workingDirectory']").value.trim();
+  if (!wd) {
+    alert("Enter a working directory first.");
+    return;
+  }
+  $("#session-browser-title").textContent = "Loading…";
+  $("#session-browser-list").innerHTML = "";
+  $("#browse-page-label").textContent = "";
+  try {
+    const r = await api(`/api/clients/${encodeURIComponent(selected)}/list`, {
+      method: "POST",
+      body: JSON.stringify({ workingDirectory: wd, page: browsePage, pageSize: PAGE_SIZE }),
+    });
+    const total = r.total ?? 0;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    $("#session-browser-title").textContent = `${total} session${total === 1 ? "" : "s"} in ${wd}`;
+    const ul = $("#session-browser-list");
+    ul.innerHTML = "";
+    if (!r.items?.length) {
+      ul.innerHTML = "<li class=empty>No sessions found.</li>";
+    }
+    for (const s of r.items ?? []) {
+      const li = document.createElement("li");
+      const label = s.title || s.lastText || "(no preview)";
+      li.innerHTML = `<div><strong>${label.replace(/</g, "&lt;")}</strong></div><div><small><code>${s.sessionId}</code> · ${fmtTime(s.lastMessageAt)}</small></div>`;
+      li.onclick = () => {
+        $("#bind-form input[name='sessionId']").value = s.sessionId;
+        $("#session-browser").classList.add("hidden");
+      };
+      ul.appendChild(li);
+    }
+    $("#browse-page-label").textContent = `Page ${browsePage + 1} / ${totalPages}`;
+    $("#browse-prev").disabled = browsePage <= 0;
+    $("#browse-next").disabled = browsePage >= totalPages - 1;
+  } catch (err) {
+    $("#session-browser-title").textContent = String(err);
+  }
+}
+
+$("#browse-sessions").addEventListener("click", () => {
+  browsePage = 0;
+  $("#session-browser").classList.remove("hidden");
+  loadBrowsePage();
+});
+$("#browse-close").addEventListener("click", () => {
+  $("#session-browser").classList.add("hidden");
+});
+$("#browse-prev").addEventListener("click", () => {
+  if (browsePage > 0) {
+    browsePage--;
+    loadBrowsePage();
+  }
+});
+$("#browse-next").addEventListener("click", () => {
+  browsePage++;
+  loadBrowsePage();
+});
 $("#logout").addEventListener("click", async () => {
   await api("/api/logout", { method: "POST" });
   location.href = "/login";

@@ -32,12 +32,35 @@ async function loadClients() {
   for (const c of list) {
     const li = document.createElement("li");
     li.className = c.name === selected ? "active" : "";
-    li.innerHTML = `<span><span class="dot ${c.online ? "up" : "down"}"></span>${c.name}<br><small>${c.hostname ?? ""} · ${c.sessions?.length ?? 0} sessions</small></span>`;
+    const prefixLabel = c.prefix ? `<small>prefix: <code>${c.prefix.replace(/</g, "&lt;").replace(/ /g, "·")}</code></small>` : "<small><em>no prefix</em></small>";
+    li.innerHTML = `<span><span class="dot ${c.online ? "up" : "down"}"></span>${c.name}<br><small>${c.hostname ?? ""} · ${c.sessions?.length ?? 0} sessions</small><br>${prefixLabel}</span>`;
     li.onclick = () => {
       selected = c.name;
       renderSessions(c);
       loadClients();
     };
+    const editPrefixBtn = document.createElement("button");
+    editPrefixBtn.textContent = "✎";
+    editPrefixBtn.title = "Edit prefix";
+    editPrefixBtn.className = "btn-secondary btn-inline";
+    editPrefixBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const next = prompt(
+        `Set name prefix for "${c.name}" (e.g. "🐧 "). Whitespace is preserved exactly:`,
+        c.prefix ?? "",
+      );
+      if (next === null) return;
+      try {
+        await api(`/api/clients/${encodeURIComponent(c.name)}/prefix`, {
+          method: "POST",
+          body: JSON.stringify({ prefix: next }),
+        });
+        loadClients();
+      } catch (err) {
+        alert(String(err));
+      }
+    };
+    li.appendChild(editPrefixBtn);
     ul.appendChild(li);
     if (selected === c.name) renderSessions(c);
   }
@@ -57,10 +80,17 @@ function renderSessions(c) {
   // Refill when client changes OR when this client's default arrives later
   // (server may not have it yet right after a restart, before the next
   // register tick from the client).
-  const fillKey = c ? `${c.name}|${def}` : null;
-  if (c && def && lastFillKey !== fillKey) {
-    for (const inp of document.querySelectorAll('input[name="workingDirectory"]')) {
-      inp.value = def;
+  const prefix = c?.prefix ?? "";
+  const fillKey = c ? `${c.name}|${def}|${prefix}` : null;
+  if (c && lastFillKey !== fillKey) {
+    if (def) {
+      for (const inp of document.querySelectorAll('input[name="workingDirectory"]')) {
+        inp.value = def;
+      }
+    }
+    const newNameInput = $("#new-form input[name='name']");
+    if (newNameInput && (newNameInput.value === "" || newNameInput.value === (lastClients.find((x) => x.name === lastFillKey?.split("|")[0])?.prefix ?? ""))) {
+      newNameInput.value = prefix;
     }
     lastFillKey = fillKey;
   }
@@ -85,9 +115,9 @@ function renderSessions(c) {
     renameBtn.className = "btn-secondary";
     renameBtn.onclick = async (e) => {
       e.stopPropagation();
-      const newName = prompt(
-        `Rename session (leave blank to let Claude auto-name it):`,
-        s.name ?? "",
+      const newName = promptWithPrefix(
+        "Rename session (leave blank to let Claude auto-name it):",
+        s.name,
       );
       if (newName === null) return;
       renameBtn.disabled = true;
@@ -135,6 +165,19 @@ function renderSessions(c) {
 function defaultWorkingDirFor(clientName) {
   const list = lastClients ?? [];
   return list.find((c) => c.name === clientName)?.defaultWorkingDirectory ?? "";
+}
+
+function prefixFor(clientName) {
+  const list = lastClients ?? [];
+  return list.find((c) => c.name === clientName)?.prefix ?? "";
+}
+
+function promptWithPrefix(message, currentName) {
+  const prefix = prefixFor(selected);
+  const seed = currentName != null && currentName !== ""
+    ? currentName
+    : prefix;
+  return prompt(message, seed);
 }
 
 async function send(form, route) {
@@ -240,9 +283,9 @@ async function loadBrowsePage() {
       renameBtn.className = "btn-secondary btn-inline";
       renameBtn.onclick = async (e) => {
         e.stopPropagation();
-        const newName = prompt(
+        const newName = promptWithPrefix(
           "Rename session (blank = let Claude auto-name):",
-          s.title ?? "",
+          s.title,
         );
         if (newName === null) return;
         renameBtn.disabled = true;

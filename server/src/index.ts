@@ -3,7 +3,7 @@ import fastifyStatic from "@fastify/static";
 import fastifyCookie from "@fastify/cookie";
 import fastifyFormbody from "@fastify/formbody";
 import path from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
@@ -31,10 +31,43 @@ interface Agent {
   hostname?: string;
   platform?: string;
   defaultWorkingDirectory?: string;
+  prefix?: string;
   registeredAt: string;
   lastSeenAt: string;
   sessions: TrackedSession[];
 }
+
+// --- prefix persistence (survives redeploys if /app/data is on a volume) ---
+const PREFS_PATH = process.env.PREFS_PATH ?? "/app/data/prefs.json";
+const prefixes = new Map<string, string>();
+
+function loadPrefs(): void {
+  try {
+    if (!existsSync(PREFS_PATH)) return;
+    const data = JSON.parse(readFileSync(PREFS_PATH, "utf8")) as Record<
+      string,
+      { prefix?: string }
+    >;
+    for (const [k, v] of Object.entries(data)) {
+      if (v?.prefix !== undefined) prefixes.set(k, v.prefix);
+    }
+  } catch (err) {
+    console.error("loadPrefs failed", err);
+  }
+}
+
+function savePrefs(): void {
+  try {
+    mkdirSync(path.dirname(PREFS_PATH), { recursive: true });
+    const out: Record<string, { prefix?: string }> = {};
+    for (const [k, v] of prefixes.entries()) out[k] = { prefix: v };
+    writeFileSync(PREFS_PATH, JSON.stringify(out, null, 2));
+  } catch (err) {
+    console.error("savePrefs failed", err);
+  }
+}
+
+loadPrefs();
 
 interface AgentCommand {
   id: string;
@@ -66,6 +99,7 @@ function touchAgent(name: string, info: Partial<Agent> = {}): Agent {
     platform: info.platform ?? prev?.platform,
     defaultWorkingDirectory:
       info.defaultWorkingDirectory ?? prev?.defaultWorkingDirectory,
+    prefix: prefixes.get(name) ?? prev?.prefix,
     registeredAt: prev?.registeredAt ?? now,
     lastSeenAt: now,
     sessions: info.sessions ?? prev?.sessions ?? [],
@@ -218,6 +252,19 @@ app.post("/api/clients/:name/sessions/bind", async (req) => {
     payload: { workingDirectory, sessionId, name: sessionName },
   };
   return enqueue(name, cmd);
+});
+
+app.post("/api/clients/:name/prefix", async (req) => {
+  const { name } = req.params as { name: string };
+  const agent = agents.get(name);
+  if (!agent) throw new Error(`unknown client: ${name}`);
+  // IMPORTANT: do NOT trim — user may want a trailing space after an emoji.
+  const { prefix } = (req.body ?? {}) as { prefix?: string };
+  const next = typeof prefix === "string" ? prefix : "";
+  prefixes.set(name, next);
+  savePrefs();
+  agents.set(name, { ...agent, prefix: next });
+  return { name, prefix: next };
 });
 
 app.post("/api/clients/:name/list", async (req) => {

@@ -119,6 +119,10 @@ async function main(): Promise<void> {
   await resumeAllTracked();
   await reportSessions();
 
+  setInterval(() => {
+    register().catch((err) => console.error("re-register failed", err));
+  }, 30_000);
+
   console.log("polling for commands...");
   await pollLoop();
 }

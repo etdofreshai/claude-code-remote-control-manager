@@ -2,6 +2,7 @@ import os from "node:os";
 import {
   startNew,
   bindExisting,
+  removeSession,
   listTracked,
   resumeAllTracked,
   setChangeListener,
@@ -56,17 +57,22 @@ async function pollOnce(): Promise<void> {
   if (!res.ok) throw new Error(`poll ${res.status}`);
   const cmd = (await res.json()) as {
     id: string;
-    type: "new" | "bind";
-    payload: { workingDirectory: string; sessionId?: string };
+    type: "new" | "bind" | "remove";
+    payload: { workingDirectory?: string; sessionId?: string };
   };
   console.log("received command", cmd.type, cmd.id);
   try {
     let result;
     if (cmd.type === "new") {
+      if (!cmd.payload.workingDirectory) throw new Error("workingDirectory required");
       result = await startNew(cmd.payload.workingDirectory);
     } else if (cmd.type === "bind") {
-      if (!cmd.payload.sessionId) throw new Error("sessionId required for bind");
+      if (!cmd.payload.sessionId || !cmd.payload.workingDirectory)
+        throw new Error("sessionId and workingDirectory required for bind");
       result = await bindExisting(cmd.payload.sessionId, cmd.payload.workingDirectory);
+    } else if (cmd.type === "remove") {
+      if (!cmd.payload.sessionId) throw new Error("sessionId required for remove");
+      result = await removeSession(cmd.payload.sessionId);
     } else {
       throw new Error(`unknown command type: ${(cmd as any).type}`);
     }

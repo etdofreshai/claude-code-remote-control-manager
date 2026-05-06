@@ -37,8 +37,8 @@ interface Agent {
 
 interface AgentCommand {
   id: string;
-  type: "new" | "bind";
-  payload: { workingDirectory: string; sessionId?: string };
+  type: "new" | "bind" | "remove";
+  payload: { workingDirectory?: string; sessionId?: string };
 }
 
 const agents = new Map<string, Agent>();
@@ -202,6 +202,17 @@ app.post("/api/clients/:name/sessions/bind", async (req) => {
     id: randomUUID(),
     type: "bind",
     payload: { workingDirectory, sessionId },
+  };
+  return enqueue(name, cmd);
+});
+
+app.delete("/api/clients/:name/sessions/:sessionId", async (req) => {
+  const { name, sessionId } = req.params as { name: string; sessionId: string };
+  if (!agents.has(name)) throw new Error(`unknown client: ${name}`);
+  const cmd: AgentCommand = {
+    id: randomUUID(),
+    type: "remove",
+    payload: { sessionId },
   };
   return enqueue(name, cmd);
 });

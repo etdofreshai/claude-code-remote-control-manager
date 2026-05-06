@@ -186,6 +186,25 @@ export async function bindExisting(
   return { ...entry, status: "running" };
 }
 
+export async function removeSession(sessionId: string): Promise<{ removed: boolean }> {
+  const rs = running.get(sessionId);
+  if (rs) {
+    try {
+      rs.abort.abort();
+    } catch {}
+    rs.close();
+    running.delete(sessionId);
+  }
+  const list = load();
+  const next = list.filter((s) => s.sessionId !== sessionId);
+  const removed = next.length !== list.length;
+  if (removed) {
+    save(next);
+    notify();
+  }
+  return { removed };
+}
+
 export async function resumeAllTracked(): Promise<void> {
   const list = load();
   for (const entry of list) {

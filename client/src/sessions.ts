@@ -383,6 +383,14 @@ export async function removeSession(sessionId: string): Promise<{ removed: boole
   const rs = running.get(sessionId);
   if (rs) {
     try {
+      await Promise.race([
+        rs.query.enableRemoteControl(false),
+        new Promise((r) => setTimeout(r, 3000)),
+      ]);
+    } catch (err) {
+      console.error(`removeSession ${sessionId}: disable failed`, err);
+    }
+    try {
       rs.abort.abort();
     } catch {}
     rs.close();

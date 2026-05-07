@@ -14,6 +14,9 @@ RUN apt-get update \
         curl \
         git \
         sudo \
+        python3 \
+        make \
+        g++ \
     && rm -rf /var/lib/apt/lists/* \
     && echo "node ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/node \
     && chmod 0440 /etc/sudoers.d/node

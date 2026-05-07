@@ -9,6 +9,7 @@ import {
   resumeAllTracked,
   shutdownAll,
   setChangeListener,
+  refreshLastMessageAtAll,
 } from "./sessions.js";
 import { listLocalSessions } from "./list.js";
 
@@ -37,6 +38,7 @@ async function postJson(path: string, body: unknown) {
 
 async function reportSessions(): Promise<void> {
   try {
+    refreshLastMessageAtAll();
     await postJson("/api/agent/sessions", {
       name: AGENT_NAME,
       sessions: listTracked(),
@@ -152,6 +154,11 @@ async function main(): Promise<void> {
   setInterval(() => {
     register().catch((err) => console.error("re-register failed", err));
   }, 30_000);
+  // Refresh last-activity timestamps from disk on a slower cadence.
+  setInterval(() => {
+    refreshLastMessageAtAll();
+    reportSessions().catch(() => {});
+  }, 15_000);
 
   console.log("polling for commands...");
   await pollLoop();

@@ -122,12 +122,9 @@ function spawnClaude(opts: {
   if (opts.name) args.push("--name", opts.name);
   args.push("--effort", process.env.REASONING_EFFORT?.trim() || "low");
   args.push("--dangerously-skip-permissions");
-  // Force remote-control bridge to come up at startup so the Claude app
-  // can connect without us calling enableRemoteControl() programmatically.
-  args.push(
-    "--settings",
-    JSON.stringify({ remoteControlAtStartup: true }),
-  );
+  // Per docs (https://code.claude.com/docs/en/remote-control#interactive-session)
+  // the documented invocation uses --remote-control directly.
+  args.push("--remote-control");
 
   const pty = ptySpawn(CLAUDE_BIN, args, {
     name: "xterm-256color",

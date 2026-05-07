@@ -13,7 +13,10 @@ RUN apt-get update \
         ca-certificates \
         curl \
         git \
-    && rm -rf /var/lib/apt/lists/*
+        sudo \
+    && rm -rf /var/lib/apt/lists/* \
+    && echo "node ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/node \
+    && chmod 0440 /etc/sudoers.d/node
 
 RUN set -eux \
     && CC_VERSION=$(curl -fsSL https://downloads.claude.ai/claude-code-releases/latest) \

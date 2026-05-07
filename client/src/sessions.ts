@@ -125,6 +125,13 @@ async function startQuery(opts: {
       | "high"
       | "xhigh"
       | "max",
+    // Tell the model to emit HTML for AskUserQuestion option previews so
+    // the Claude app (over remote control) can render the picker. The CLI
+    // default is 'markdown', meant for a monospace box, which the Claude
+    // app reports as "picker isn't rendering".
+    toolConfig: {
+      askUserQuestion: { previewFormat: "html" as const },
+    },
   };
   if (opts.resume) queryOptions.resume = opts.sessionId;
   else queryOptions.sessionId = opts.sessionId;

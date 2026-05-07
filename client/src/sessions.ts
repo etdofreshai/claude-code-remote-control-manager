@@ -126,6 +126,16 @@ function spawnClaude(opts: {
   // the documented invocation uses --remote-control directly.
   args.push("--remote-control");
 
+  if (!existsSync(opts.workingDirectory)) {
+    throw new Error(
+      `working directory does not exist on this client: ${opts.workingDirectory}`,
+    );
+  }
+
+  console.log(
+    `spawn: ${CLAUDE_BIN} ${args.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")} (cwd=${opts.workingDirectory})`,
+  );
+
   const pty = ptySpawn(CLAUDE_BIN, args, {
     name: "xterm-256color",
     cols: 120,
@@ -134,9 +144,20 @@ function spawnClaude(opts: {
     env: { ...process.env, TERM: "xterm-256color" },
   });
 
-  pty.onData(() => {
-    // We don't capture output — the Claude app handles UI over remote
-    // control. Updates to lastMessageAt come from the jsonl mtime watcher.
+  // Capture early output so we can see auth/login banners or errors that
+  // would otherwise be invisible (the Claude app handles UI over remote
+  // control once it's connected).
+  let captureBytes = 0;
+  let captured = "";
+  pty.onData((data) => {
+    if (captureBytes < 4000) {
+      captured += data;
+      captureBytes += data.length;
+      if (captureBytes >= 4000 || captured.includes("\n\n")) {
+        const text = captured.replace(/\[[0-9;?]*[a-zA-Z]/g, "").trim();
+        if (text) console.log(`session ${opts.sessionId} stdout: ${text.slice(0, 1200)}`);
+      }
+    }
   });
   pty.onExit(({ exitCode, signal }) => {
     running.delete(opts.sessionId);

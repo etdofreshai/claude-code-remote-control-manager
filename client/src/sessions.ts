@@ -5,7 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { load, save, type TrackedSession, type Effort } from "./state.js";
 import { readSessionTitle } from "./list.js";
-import { getProvider } from "./providers.js";
+import { getProvider, resolveEndpoint } from "./providers.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (s: string) => UUID_RE.test(s);
@@ -163,11 +163,11 @@ function buildEnvOverrides(opts: {
   provider: string;
   model?: string;
 }): Record<string, string | undefined> {
-  const provider = getProvider(opts.provider);
+  const { baseUrl, authToken } = resolveEndpoint(opts.provider, opts.model);
   const overrides: Record<string, string | undefined> = {};
-  if (provider?.baseUrl) {
-    overrides.ANTHROPIC_BASE_URL = provider.baseUrl;
-    if (provider.authToken) overrides.ANTHROPIC_AUTH_TOKEN = provider.authToken;
+  if (baseUrl) {
+    overrides.ANTHROPIC_BASE_URL = baseUrl;
+    if (authToken) overrides.ANTHROPIC_AUTH_TOKEN = authToken;
     if (opts.model) {
       overrides.ANTHROPIC_DEFAULT_HAIKU_MODEL = opts.model;
       overrides.ANTHROPIC_DEFAULT_SONNET_MODEL = opts.model;
@@ -213,6 +213,12 @@ async function startQuery(opts: {
   // correctly. Auto-allow everything else (we still set bypassPermissions
   // for the rest).
   const isNativeClaudeProvider = !provider?.baseUrl;
+  // The bridge translates Anthropic /v1/messages -> OpenAI /v1/responses,
+  // which means web_search rides the upstream's native built-in. So
+  // sessions routing through the bridge can let WebSearch through.
+  const goesThroughBridge =
+    resolveEndpoint(opts.provider, opts.model).baseUrl?.includes("bridge") ??
+    false;
   const canUseTool = async (toolName: string, input: any) => {
     if (toolName === "AskUserQuestion") {
       const count = input?.questions?.length ?? 0;
@@ -238,7 +244,7 @@ async function startQuery(opts: {
           "\n\nDo not invoke AskUserQuestion again for this exchange.",
       };
     }
-    if (toolName === "WebSearch" && !isNativeClaudeProvider) {
+    if (toolName === "WebSearch" && !isNativeClaudeProvider && !goesThroughBridge) {
       const q = input?.query ?? "";
       console.log(
         `session ${opts.sessionId}: redirecting WebSearch to Bash (provider=${opts.provider}, query="${String(q).slice(0, 80)}")`,

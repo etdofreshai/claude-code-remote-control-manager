@@ -19,15 +19,25 @@ export interface ProviderConfig {
   baseUrl?: string;
   authToken?: string;
   models: string[];
+  /**
+   * Per-model overrides — same shape as the parent. Useful when one model
+   * in a provider needs a different upstream URL (e.g. routing `codex`
+   * through our /v1/messages → /v1/responses bridge while `glm` keeps
+   * going direct to LiteLLM).
+   */
+  modelOverrides?: Record<string, { baseUrl?: string; authToken?: string }>;
 }
 
 export type ProvidersConfig = Record<string, ProviderConfig>;
 
 const LITELLM_DEFAULT_BASE_URL = "https://litellm.etdofresh.com";
+const BRIDGE_DEFAULT_BASE_URL = "https://ccrcm-bridge.etdofresh.com";
 
 function defaultProviders(): ProvidersConfig {
   const liteToken = process.env.LITELLM_TOKEN?.trim();
   const liteUrl = process.env.LITELLM_BASE_URL?.trim() || LITELLM_DEFAULT_BASE_URL;
+  const bridgeUrl =
+    process.env.BRIDGE_BASE_URL?.trim() || BRIDGE_DEFAULT_BASE_URL;
   return {
     claude: {
       models: [
@@ -41,6 +51,11 @@ function defaultProviders(): ProvidersConfig {
       baseUrl: liteUrl,
       authToken: liteToken,
       models: ["codex", "glm"],
+      modelOverrides: {
+        // codex needs the bridge so /v1/messages -> /v1/responses
+        // translation reaches the chatgpt upstream's web_search.
+        codex: { baseUrl: bridgeUrl, authToken: liteToken },
+      },
     },
   };
 }
@@ -86,4 +101,18 @@ export function getProvider(name: string | undefined): ProviderConfig | null {
   if (!name) return null;
   const cfg = loadProviders();
   return cfg[name] ?? null;
+}
+
+/** Resolve effective baseUrl/authToken for a provider+model combination. */
+export function resolveEndpoint(
+  providerName: string | undefined,
+  modelName: string | undefined,
+): { baseUrl?: string; authToken?: string } {
+  const p = getProvider(providerName);
+  if (!p) return {};
+  const override = modelName ? p.modelOverrides?.[modelName] : undefined;
+  return {
+    baseUrl: override?.baseUrl ?? p.baseUrl,
+    authToken: override?.authToken ?? p.authToken,
+  };
 }

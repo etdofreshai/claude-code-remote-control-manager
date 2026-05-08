@@ -22,6 +22,7 @@ interface RunningSession {
   workingDirectory: string;
   pty: IPty;
   startedAt: string;
+  exited: Promise<void>;
 }
 
 const running = new Map<string, RunningSession>();
@@ -181,6 +182,10 @@ function spawnClaude(opts: {
       }
     }
   });
+  let resolveExit!: () => void;
+  const exited = new Promise<void>((r) => {
+    resolveExit = r;
+  });
   pty.onExit(({ exitCode, signal }) => {
     running.delete(opts.sessionId);
     const list = load();
@@ -192,6 +197,7 @@ function spawnClaude(opts: {
     console.log(
       `session ${opts.sessionId}: pty exited (code=${exitCode}, signal=${signal})`,
     );
+    resolveExit();
   });
 
   const rs: RunningSession = {
@@ -199,6 +205,7 @@ function spawnClaude(opts: {
     workingDirectory: opts.workingDirectory,
     pty,
     startedAt: new Date().toISOString(),
+    exited,
   };
   running.set(opts.sessionId, rs);
   patch(opts.sessionId, { status: "running" });
@@ -223,17 +230,45 @@ function spawnClaude(opts: {
   return rs;
 }
 
-async function killSession(sessionId: string): Promise<void> {
+async function killSession(
+  sessionId: string,
+  opts: { graceful?: boolean } = {},
+): Promise<void> {
   const rs = running.get(sessionId);
   if (!rs) return;
-  running.delete(sessionId);
-  try {
-    rs.pty.kill("SIGTERM");
-  } catch {}
-  await new Promise((r) => setTimeout(r, 400));
-  try {
-    rs.pty.kill("SIGKILL");
-  } catch {}
+
+  const wait = (ms: number) =>
+    Promise.race([
+      rs.exited,
+      new Promise((r) => setTimeout(r, ms)),
+    ]);
+
+  if (opts.graceful) {
+    // Try to make the CLI exit cleanly so the remote-control bridge
+    // unregisters before the process dies.
+    try {
+      rs.pty.write("/exit\r");
+    } catch {}
+    await wait(4000);
+    if (running.has(sessionId)) {
+      try {
+        rs.pty.kill("SIGTERM");
+      } catch {}
+      await wait(1500);
+    }
+  } else {
+    try {
+      rs.pty.kill("SIGTERM");
+    } catch {}
+    await wait(800);
+  }
+
+  if (running.has(sessionId)) {
+    try {
+      rs.pty.kill("SIGKILL");
+    } catch {}
+    running.delete(sessionId);
+  }
 }
 
 /** ─── public API used by index.ts ─── */
@@ -408,14 +443,21 @@ export async function resumeAllTracked(): Promise<void> {
   }
 }
 
-export async function shutdownAll(timeoutMs = 5000): Promise<void> {
+export async function shutdownAll(timeoutMs = 8000): Promise<void> {
   const sessions = [...running.values()];
   if (!sessions.length) return;
-  console.log(`shutdown: stopping ${sessions.length} sessions...`);
+  console.log(`shutdown: stopping ${sessions.length} sessions gracefully...`);
   await Promise.race([
-    Promise.all(sessions.map((rs) => killSession(rs.sessionId))),
+    Promise.all(sessions.map((rs) => killSession(rs.sessionId, { graceful: true }))),
     new Promise((r) => setTimeout(r, timeoutMs)),
   ]);
+  // Force-kill anything still alive after the budget.
+  const leftover = [...running.values()];
+  for (const rs of leftover) {
+    try {
+      rs.pty.kill("SIGKILL");
+    } catch {}
+  }
   running.clear();
   console.log("shutdown: done");
 }

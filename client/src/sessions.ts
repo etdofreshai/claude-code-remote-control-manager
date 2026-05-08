@@ -138,24 +138,40 @@ function spawnClaude(opts: {
   const provider = getProvider(opts.provider);
   // (provider may be null for "claude" with no PROVIDERS_JSON entry — fine)
 
+  // Claude Code rejects --model values it doesn't recognize. To route to
+  // a non-Claude upstream (e.g. glm via LiteLLM) we leave --model blank
+  // and instead set ANTHROPIC_DEFAULT_*_MODEL env vars so every tier
+  // (Haiku/Sonnet/Opus) resolves to the chosen upstream alias.
+  const isNativeClaude = !provider?.baseUrl;
+  const passModelFlag = isNativeClaude && !!opts.model;
+
   const args: string[] = [];
   if (opts.resume) args.push("--resume", opts.sessionId);
   else args.push("--session-id", opts.sessionId);
   if (opts.name) args.push("--name", opts.name);
-  if (opts.model) args.push("--model", opts.model);
+  if (passModelFlag) args.push("--model", opts.model!);
   args.push("--effort", opts.effort);
   args.push("--dangerously-skip-permissions");
   args.push("--remote-control");
   if (opts.initialMessage) args.push(opts.initialMessage);
 
   const env = { ...process.env, TERM: "xterm-256color" } as NodeJS.ProcessEnv;
-  if (provider?.baseUrl) env.ANTHROPIC_BASE_URL = provider.baseUrl;
-  if (provider?.authToken) env.ANTHROPIC_AUTH_TOKEN = provider.authToken;
-  if (!provider?.baseUrl) {
-    // For native claude provider, make sure we don't inherit a stale base URL
-    // from a parent shell.
+  if (provider?.baseUrl) {
+    env.ANTHROPIC_BASE_URL = provider.baseUrl;
+    if (provider.authToken) env.ANTHROPIC_AUTH_TOKEN = provider.authToken;
+    if (opts.model) {
+      env.ANTHROPIC_DEFAULT_HAIKU_MODEL = opts.model;
+      env.ANTHROPIC_DEFAULT_SONNET_MODEL = opts.model;
+      env.ANTHROPIC_DEFAULT_OPUS_MODEL = opts.model;
+    }
+  } else {
+    // Native claude provider: make sure we don't inherit stale gateway
+    // overrides from a parent shell.
     delete env.ANTHROPIC_BASE_URL;
     delete env.ANTHROPIC_AUTH_TOKEN;
+    delete env.ANTHROPIC_DEFAULT_HAIKU_MODEL;
+    delete env.ANTHROPIC_DEFAULT_SONNET_MODEL;
+    delete env.ANTHROPIC_DEFAULT_OPUS_MODEL;
   }
 
   console.log(

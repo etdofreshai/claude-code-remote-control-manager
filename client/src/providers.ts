@@ -1,24 +1,18 @@
 /**
- * Provider config:
+ * Provider config.
  *
- *   PROVIDERS_JSON = {
- *     "claude": { "models": ["claude-sonnet-4-5", "claude-opus-4-7"] },
- *     "codex": {
- *       "baseUrl": "https://litellm.example/v1",
- *       "authToken": "sk-litellm-...",
- *       "models": ["gpt-5", "gpt-5-mini"]
- *     },
- *     "glm": {
- *       "baseUrl": "https://litellm.example/v1",
- *       "authToken": "sk-litellm-...",
- *       "models": ["glm-4.6"]
- *     }
+ * Defaults (hard-coded below) point at https://litellm.etdofresh.com for
+ * `codex` and `glm`. Set LITELLM_TOKEN in the client env so the spawned
+ * claude binary can authenticate. The native `claude` provider is
+ * authless from the binary's POV — it uses ~/.claude credentials.
+ *
+ * Override the entire map by setting PROVIDERS_JSON in env, e.g.:
+ *
+ *   PROVIDERS_JSON={
+ *     "claude": { "models": ["claude-sonnet-4-7","claude-opus-4-7"] },
+ *     "codex":  { "baseUrl": "https://litellm.example", "authToken": "sk-...", "models": ["codex"] },
+ *     "glm":    { "baseUrl": "https://litellm.example", "authToken": "sk-...", "models": ["glm"]   }
  *   }
- *
- * baseUrl + authToken go to ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN at
- * spawn time so the claude CLI talks to a LiteLLM (or any Anthropic-API-
- * compatible) gateway. The "claude" provider can omit them to use native
- * auth from ~/.claude.
  */
 
 export interface ProviderConfig {
@@ -29,30 +23,61 @@ export interface ProviderConfig {
 
 export type ProvidersConfig = Record<string, ProviderConfig>;
 
+const LITELLM_DEFAULT_BASE_URL = "https://litellm.etdofresh.com";
+
+function defaultProviders(): ProvidersConfig {
+  const liteToken = process.env.LITELLM_TOKEN?.trim();
+  return {
+    claude: {
+      models: [
+        "claude-opus-4-7",
+        "claude-sonnet-4-7",
+        "claude-haiku-4-5",
+        "claude-sonnet-4-6",
+      ],
+    },
+    codex: {
+      baseUrl: process.env.CODEX_BASE_URL?.trim() || LITELLM_DEFAULT_BASE_URL,
+      authToken: process.env.CODEX_AUTH_TOKEN?.trim() || liteToken,
+      models: ["codex"],
+    },
+    glm: {
+      baseUrl: process.env.GLM_BASE_URL?.trim() || LITELLM_DEFAULT_BASE_URL,
+      authToken: process.env.GLM_AUTH_TOKEN?.trim() || liteToken,
+      models: ["glm"],
+    },
+  };
+}
+
 let cached: ProvidersConfig | null = null;
 
 export function loadProviders(): ProvidersConfig {
   if (cached) return cached;
   const raw = process.env.PROVIDERS_JSON?.trim();
   if (!raw) {
-    cached = { claude: { models: [] } };
+    cached = defaultProviders();
     return cached;
   }
   try {
     const parsed = JSON.parse(raw) as ProvidersConfig;
-    // Always include "claude" as a provider option even if not declared.
-    if (!parsed.claude) parsed.claude = { models: [] };
+    if (!parsed.claude) parsed.claude = defaultProviders().claude;
     cached = parsed;
     return cached;
   } catch (err) {
-    console.error("PROVIDERS_JSON is not valid JSON; ignoring", err);
-    cached = { claude: { models: [] } };
+    console.error(
+      "PROVIDERS_JSON is not valid JSON; falling back to defaults",
+      err,
+    );
+    cached = defaultProviders();
     return cached;
   }
 }
 
 /** Sanitized form to advertise to the server (no auth tokens). */
-export function publicProviders(): Record<string, { baseUrl?: string; models: string[] }> {
+export function publicProviders(): Record<
+  string,
+  { baseUrl?: string; models: string[] }
+> {
   const cfg = loadProviders();
   const out: Record<string, { baseUrl?: string; models: string[] }> = {};
   for (const [name, p] of Object.entries(cfg)) {

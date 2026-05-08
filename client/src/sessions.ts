@@ -270,7 +270,8 @@ export async function startNew(opts: StartOpts): Promise<TrackedSession> {
     provider,
     model: entry.model,
     effort,
-    initialMessage: startupMessage({ provider, model: entry.model, effort }),
+    // Skip initial message: it becomes the auto-summarized title in the
+    // Claude app and overrides --name.
   });
   return { ...entry, status: "running" };
 }
@@ -307,7 +308,6 @@ export async function bindExisting(opts: BindOpts): Promise<TrackedSession> {
     provider,
     model: entry.model,
     effort,
-    initialMessage: startupMessage({ provider, model: entry.model, effort }),
   });
   return { ...entry, status: "running" };
 }

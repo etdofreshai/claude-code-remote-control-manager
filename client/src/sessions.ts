@@ -164,6 +164,8 @@ function spawnClaude(opts: {
       env.ANTHROPIC_DEFAULT_SONNET_MODEL = opts.model;
       env.ANTHROPIC_DEFAULT_OPUS_MODEL = opts.model;
     }
+    // Stop the binary from auto-appending "[1m]" to non-Claude models.
+    env.CLAUDE_CODE_DISABLE_1M_CONTEXT = "1";
   } else {
     // Native claude provider: make sure we don't inherit stale gateway
     // overrides from a parent shell.

@@ -214,11 +214,27 @@ async function startQuery(opts: {
   // for the rest).
   const canUseTool = async (toolName: string, input: any) => {
     if (toolName === "AskUserQuestion") {
-      console.log(`session ${opts.sessionId}: redirecting AskUserQuestion to chat (questions=${input?.questions?.length ?? 0})`);
+      const count = input?.questions?.length ?? 0;
+      console.log(
+        `session ${opts.sessionId}: redirecting AskUserQuestion to chat (questions=${count})`,
+      );
+      const totalLine =
+        count > 1
+          ? ` There are ${count} questions total — ask them ONE AT A TIME, waiting for the user's answer before posting the next.`
+          : "";
       return {
         behavior: "deny" as const,
         message:
-          "AskUserQuestion is unavailable in this remote-control session due to an unfixed Claude bridge bug. Instead, ask your question(s) directly in your next assistant message. Phrase the options as a numbered list and wait for the user's reply.",
+          "AskUserQuestion is intercepted in this remote-control session because the picker UI doesn't yet round-trip cleanly over Anthropic's JSON-streaming bridge. " +
+          "Re-ask in plain assistant text using this format:\n" +
+          "\n" +
+          "1. Open the message with this exact disclaimer line: " +
+          "\"⚠️ AskUserQuestion isn't yet supported over remote JSON streaming — answering inline.\"\n" +
+          "2. Show ONE question only, followed by lettered options (a, b, c, d…) one per line, each with the option's label and a short description.\n" +
+          "3. Add a final \"Or type your own answer.\" line.\n" +
+          "4. Stop and wait for the user's reply." +
+          totalLine +
+          "\n\nDo not invoke AskUserQuestion again for this exchange.",
       };
     }
     return { behavior: "allow" as const, updatedInput: input };

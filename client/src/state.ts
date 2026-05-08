@@ -2,10 +2,15 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+
 export interface TrackedSession {
   sessionId: string;
   workingDirectory: string;
   name?: string;
+  provider?: string;
+  model?: string;
+  effort?: Effort;
   addedAt: string;
   lastMessageAt?: string;
   status?: "starting" | "running" | "errored" | "stopped";

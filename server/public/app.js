@@ -81,8 +81,10 @@ function renderSessions(c) {
   // (server may not have it yet right after a restart, before the next
   // register tick from the client).
   const prefix = c?.prefix ?? "";
-  const fillKey = c ? `${c.name}|${def}|${prefix}` : null;
+  const providersKey = JSON.stringify(c?.providers ?? null);
+  const fillKey = c ? `${c.name}|${def}|${prefix}|${providersKey}|${c?.defaultProvider}|${c?.defaultEffort}` : null;
   if (c && lastFillKey !== fillKey) {
+    populateProviderSelects(c);
     if (def) {
       for (const inp of document.querySelectorAll('input[name="workingDirectory"]')) {
         inp.value = def;
@@ -106,7 +108,11 @@ function renderSessions(c) {
   for (const s of sessions) {
     const li = document.createElement("li");
     const title = s.name ? `<strong>${s.name}</strong><br>` : "";
-    li.innerHTML = `<span>${title}<code>${s.sessionId}</code><br><small>${s.workingDirectory}</small><br><small>${s.status ?? "—"} · last ${fmtTime(s.lastMessageAt)}</small></span>`;
+    const providerBits = [s.provider, s.model, s.effort && `effort:${s.effort}`]
+      .filter(Boolean)
+      .join(" · ");
+    const providerLine = providerBits ? `<br><small>${providerBits}</small>` : "";
+    li.innerHTML = `<span>${title}<code>${s.sessionId}</code><br><small>${s.workingDirectory}</small>${providerLine}<br><small>${s.status ?? "—"} · last ${fmtTime(s.lastMessageAt)}</small></span>`;
     const btns = document.createElement("div");
     btns.className = "btn-stack";
 
@@ -167,6 +173,45 @@ function defaultWorkingDirFor(clientName) {
   return list.find((c) => c.name === clientName)?.defaultWorkingDirectory ?? "";
 }
 
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
+function populateProviderSelects(c) {
+  const providers = c?.providers ?? { claude: { models: [] } };
+  const providerNames = Object.keys(providers);
+  if (!providerNames.length) providerNames.push("claude");
+  const defaultProvider = c?.defaultProvider && providers[c.defaultProvider]
+    ? c.defaultProvider
+    : providerNames[0];
+  const defaultEffort = EFFORTS.includes(c?.defaultEffort) ? c.defaultEffort : "low";
+
+  for (const form of [$("#new-form"), $("#bind-form")]) {
+    if (!form) continue;
+    const provSel = form.querySelector('select[name="provider"]');
+    const modelSel = form.querySelector('select[name="model"]');
+    const effortSel = form.querySelector('select[name="effort"]');
+
+    provSel.innerHTML = providerNames
+      .map((n) => `<option value="${n}">${n}</option>`)
+      .join("");
+    provSel.value = defaultProvider;
+
+    effortSel.innerHTML = EFFORTS.map(
+      (e) => `<option value="${e}">${e}</option>`,
+    ).join("");
+    effortSel.value = defaultEffort;
+
+    const refreshModels = () => {
+      const p = providers[provSel.value] ?? { models: [] };
+      const models = p.models ?? [];
+      modelSel.innerHTML =
+        `<option value="">(provider default)</option>` +
+        models.map((m) => `<option value="${m}">${m}</option>`).join("");
+    };
+    provSel.onchange = refreshModels;
+    refreshModels();
+  }
+}
+
 function prefixFor(clientName) {
   const list = lastClients ?? [];
   return list.find((c) => c.name === clientName)?.prefix ?? "";
@@ -187,6 +232,9 @@ async function send(form, route) {
   }
   const body = Object.fromEntries(new FormData(form));
   if (body.name === "") delete body.name;
+  if (body.model === "") delete body.model;
+  if (body.provider === "") delete body.provider;
+  if (body.effort === "") delete body.effort;
   showResult("…sending");
   try {
     const r = await api(`/api/clients/${encodeURIComponent(selected)}/sessions/${route}`, {
@@ -195,12 +243,13 @@ async function send(form, route) {
     });
     showResult(JSON.stringify(r, null, 2));
     form.reset();
-    // Re-fill workingDirectory with the selected client's default rather than
-    // leaving it blank.
+    // Re-fill workingDirectory + provider/model/effort selects after reset.
     const def = defaultWorkingDirFor(selected);
     for (const inp of form.querySelectorAll('input[name="workingDirectory"]')) {
       inp.value = def;
     }
+    const c = lastClients.find((x) => x.name === selected);
+    if (c) populateProviderSelects(c);
     form.classList.add("hidden");
     loadClients();
   } catch (err) {

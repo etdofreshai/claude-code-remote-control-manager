@@ -12,6 +12,8 @@ import {
   refreshLastMessageAtAll,
 } from "./sessions.js";
 import { listLocalSessions } from "./list.js";
+import { publicProviders } from "./providers.js";
+import type { Effort } from "./state.js";
 
 const SERVER_URL = (process.env.SERVER_URL ?? "").replace(/\/+$/, "");
 const CLIENT_TOKEN = process.env.CLIENT_TOKEN ?? "";
@@ -54,6 +56,9 @@ async function register(): Promise<void> {
     hostname: os.hostname(),
     platform: process.platform,
     defaultWorkingDirectory: DEFAULT_WORKING_DIRECTORY || undefined,
+    providers: publicProviders(),
+    defaultProvider: process.env.DEFAULT_PROVIDER?.trim() || "claude",
+    defaultEffort: (process.env.REASONING_EFFORT?.trim() || "low") as Effort,
     sessions: listTracked(),
   });
 }
@@ -70,6 +75,9 @@ async function pollOnce(): Promise<void> {
       workingDirectory?: string;
       sessionId?: string;
       name?: string;
+      provider?: string;
+      model?: string;
+      effort?: Effort;
       page?: number;
       pageSize?: number;
       query?: string;
@@ -80,15 +88,24 @@ async function pollOnce(): Promise<void> {
     let result;
     if (cmd.type === "new") {
       if (!cmd.payload.workingDirectory) throw new Error("workingDirectory required");
-      result = await startNew(cmd.payload.workingDirectory, cmd.payload.name);
+      result = await startNew({
+        workingDirectory: cmd.payload.workingDirectory,
+        name: cmd.payload.name,
+        provider: cmd.payload.provider,
+        model: cmd.payload.model,
+        effort: cmd.payload.effort,
+      });
     } else if (cmd.type === "bind") {
       if (!cmd.payload.sessionId || !cmd.payload.workingDirectory)
         throw new Error("sessionId and workingDirectory required for bind");
-      result = await bindExisting(
-        cmd.payload.sessionId,
-        cmd.payload.workingDirectory,
-        cmd.payload.name,
-      );
+      result = await bindExisting({
+        sessionId: cmd.payload.sessionId,
+        workingDirectory: cmd.payload.workingDirectory,
+        name: cmd.payload.name,
+        provider: cmd.payload.provider,
+        model: cmd.payload.model,
+        effort: cmd.payload.effort,
+      });
     } else if (cmd.type === "remove") {
       if (!cmd.payload.sessionId) throw new Error("sessionId required for remove");
       result = await removeSession(cmd.payload.sessionId);

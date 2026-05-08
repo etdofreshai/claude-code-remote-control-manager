@@ -26,12 +26,20 @@ interface TrackedSession {
   status?: string;
 }
 
+interface ProviderInfo {
+  baseUrl?: string;
+  models: string[];
+}
+
 interface Agent {
   name: string;
   hostname?: string;
   platform?: string;
   defaultWorkingDirectory?: string;
   prefix?: string;
+  providers?: Record<string, ProviderInfo>;
+  defaultProvider?: string;
+  defaultEffort?: string;
   registeredAt: string;
   lastSeenAt: string;
   sessions: TrackedSession[];
@@ -110,6 +118,9 @@ interface AgentCommand {
     workingDirectory?: string;
     sessionId?: string;
     name?: string;
+    provider?: string;
+    model?: string;
+    effort?: string;
     page?: number;
     pageSize?: number;
     query?: string;
@@ -134,6 +145,9 @@ function touchAgent(name: string, info: Partial<Agent> = {}): Agent {
     defaultWorkingDirectory:
       info.defaultWorkingDirectory ?? prev?.defaultWorkingDirectory,
     prefix: prefixes.get(name) ?? prev?.prefix,
+    providers: info.providers ?? prev?.providers,
+    defaultProvider: info.defaultProvider ?? prev?.defaultProvider,
+    defaultEffort: info.defaultEffort ?? prev?.defaultEffort,
     registeredAt: prev?.registeredAt ?? now,
     lastSeenAt: now,
     sessions: info.sessions ?? prev?.sessions ?? [],
@@ -258,15 +272,24 @@ app.get("/api/clients", async () => {
 app.post("/api/clients/:name/sessions/new", async (req) => {
   const { name } = req.params as { name: string };
   if (!agents.has(name)) throw new Error(`unknown client: ${name}`);
-  const { workingDirectory, name: sessionName } = req.body as {
+  const {
+    workingDirectory,
+    name: sessionName,
+    provider,
+    model,
+    effort,
+  } = req.body as {
     workingDirectory: string;
     name?: string;
+    provider?: string;
+    model?: string;
+    effort?: string;
   };
   if (!workingDirectory) throw new Error("workingDirectory required");
   const cmd: AgentCommand = {
     id: randomUUID(),
     type: "new",
-    payload: { workingDirectory, name: sessionName },
+    payload: { workingDirectory, name: sessionName, provider, model, effort },
   };
   return enqueue(name, cmd);
 });
@@ -274,17 +297,34 @@ app.post("/api/clients/:name/sessions/new", async (req) => {
 app.post("/api/clients/:name/sessions/bind", async (req) => {
   const { name } = req.params as { name: string };
   if (!agents.has(name)) throw new Error(`unknown client: ${name}`);
-  const { workingDirectory, sessionId, name: sessionName } = req.body as {
+  const {
+    workingDirectory,
+    sessionId,
+    name: sessionName,
+    provider,
+    model,
+    effort,
+  } = req.body as {
     workingDirectory: string;
     sessionId: string;
     name?: string;
+    provider?: string;
+    model?: string;
+    effort?: string;
   };
   if (!workingDirectory || !sessionId)
     throw new Error("workingDirectory and sessionId required");
   const cmd: AgentCommand = {
     id: randomUUID(),
     type: "bind",
-    payload: { workingDirectory, sessionId, name: sessionName },
+    payload: {
+      workingDirectory,
+      sessionId,
+      name: sessionName,
+      provider,
+      model,
+      effort,
+    },
   };
   return enqueue(name, cmd);
 });

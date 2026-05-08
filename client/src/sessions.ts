@@ -1,5 +1,4 @@
-import { renameSession } from "@anthropic-ai/claude-agent-sdk";
-import { spawn as ptySpawn, type IPty } from "node-pty";
+import { query, renameSession } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
@@ -11,18 +10,17 @@ import { getProvider } from "./providers.js";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (s: string) => UUID_RE.test(s);
 
-const CLAUDE_BIN =
-  process.env.CLAUDE_CODE_EXECUTABLE?.trim() || "/usr/local/bin/claude";
-
 const DEFAULT_PROVIDER = process.env.DEFAULT_PROVIDER?.trim() || "claude";
 const DEFAULT_EFFORT = (process.env.REASONING_EFFORT?.trim() || "low") as Effort;
 
 interface RunningSession {
   sessionId: string;
   workingDirectory: string;
-  pty: IPty;
-  startedAt: string;
-  exited: Promise<void>;
+  abort: AbortController;
+  push: (msg: any) => void;
+  close: () => void;
+  ready: Promise<void>;
+  query: any;
 }
 
 const running = new Map<string, RunningSession>();
@@ -108,18 +106,86 @@ function generateName(): string {
   return `${a}-${n}`;
 }
 
-function startupMessage(opts: {
+function createMessageStream() {
+  const queueArr: any[] = [];
+  let resolveWaiter: (() => void) | null = null;
+  let closed = false;
+
+  const stream: AsyncIterable<any> = {
+    [Symbol.asyncIterator]() {
+      return {
+        async next(): Promise<IteratorResult<any>> {
+          while (queueArr.length === 0) {
+            if (closed) return { done: true, value: undefined };
+            await new Promise<void>((r) => {
+              resolveWaiter = r;
+            });
+            resolveWaiter = null;
+          }
+          return { done: false, value: queueArr.shift()! };
+        },
+      };
+    },
+  };
+
+  return {
+    stream,
+    push(msg: any) {
+      queueArr.push(msg);
+      resolveWaiter?.();
+    },
+    close() {
+      closed = true;
+      resolveWaiter?.();
+    },
+  };
+}
+
+function bootstrapMessage(opts: {
   provider: string;
   model?: string;
   effort: Effort;
-}): string {
+}): any {
   const origin = (process.env.SERVER_URL ?? "").trim() || "claude-code-remote-control-manager";
   const host = process.env.AGENT_NAME?.trim() || os.hostname();
   const modelPart = opts.model ? `${opts.provider}/${opts.model}` : opts.provider;
-  return `Session started from ${origin} on host ${host} via ${modelPart} (effort: ${opts.effort}). No reply needed.`;
+  const text = `Session started from ${origin} on host ${host} via ${modelPart} (effort: ${opts.effort}). No reply needed.`;
+  return {
+    type: "user",
+    message: { role: "user", content: text },
+    parent_tool_use_id: null,
+    isSynthetic: true,
+    timestamp: new Date().toISOString(),
+  };
 }
 
-function spawnClaude(opts: {
+function buildEnvOverrides(opts: {
+  provider: string;
+  model?: string;
+}): Record<string, string | undefined> {
+  const provider = getProvider(opts.provider);
+  const overrides: Record<string, string | undefined> = {};
+  if (provider?.baseUrl) {
+    overrides.ANTHROPIC_BASE_URL = provider.baseUrl;
+    if (provider.authToken) overrides.ANTHROPIC_AUTH_TOKEN = provider.authToken;
+    if (opts.model) {
+      overrides.ANTHROPIC_DEFAULT_HAIKU_MODEL = opts.model;
+      overrides.ANTHROPIC_DEFAULT_SONNET_MODEL = opts.model;
+      overrides.ANTHROPIC_DEFAULT_OPUS_MODEL = opts.model;
+    }
+    overrides.CLAUDE_CODE_DISABLE_1M_CONTEXT = "1";
+  } else {
+    // Native claude provider — clear any inherited gateway overrides.
+    overrides.ANTHROPIC_BASE_URL = undefined;
+    overrides.ANTHROPIC_AUTH_TOKEN = undefined;
+    overrides.ANTHROPIC_DEFAULT_HAIKU_MODEL = undefined;
+    overrides.ANTHROPIC_DEFAULT_SONNET_MODEL = undefined;
+    overrides.ANTHROPIC_DEFAULT_OPUS_MODEL = undefined;
+  }
+  return overrides;
+}
+
+async function startQuery(opts: {
   sessionId: string;
   workingDirectory: string;
   resume: boolean;
@@ -127,173 +193,142 @@ function spawnClaude(opts: {
   provider: string;
   model?: string;
   effort: Effort;
-  initialMessage?: string;
-}): RunningSession {
-  if (!existsSync(opts.workingDirectory)) {
-    throw new Error(
-      `working directory does not exist on this client: ${opts.workingDirectory}`,
-    );
+  pushBootstrap: boolean;
+}): Promise<RunningSession> {
+  const { stream, push, close } = createMessageStream();
+  const abort = new AbortController();
+
+  // Bootstrap only on brand-new sessions: the SDK needs *some* input to
+  // fire its init event before we can call enableRemoteControl(). Resumed
+  // sessions (bind + reboot-time restore) init from existing transcript
+  // state, so no synthetic message is needed.
+  if (!opts.resume && opts.pushBootstrap) {
+    push(bootstrapMessage({ provider: opts.provider, model: opts.model, effort: opts.effort }));
   }
 
-  const provider = getProvider(opts.provider);
-  // (provider may be null for "claude" with no PROVIDERS_JSON entry — fine)
-
-  // Claude Code rejects --model values it doesn't recognize. To route to
-  // a non-Claude upstream (e.g. glm via LiteLLM) we leave --model blank
-  // and instead set ANTHROPIC_DEFAULT_*_MODEL env vars so every tier
-  // (Haiku/Sonnet/Opus) resolves to the chosen upstream alias.
-  const isNativeClaude = !provider?.baseUrl;
-  const passModelFlag = isNativeClaude && !!opts.model;
-
-  const args: string[] = [];
-  if (opts.resume) args.push("--resume", opts.sessionId);
-  else args.push("--session-id", opts.sessionId);
-  if (opts.name) args.push("--name", opts.name);
-  if (passModelFlag) args.push("--model", opts.model!);
-  args.push("--effort", opts.effort);
-  args.push("--dangerously-skip-permissions");
-  args.push("--remote-control");
-  if (opts.initialMessage) args.push(opts.initialMessage);
-
-  const env = { ...process.env, TERM: "xterm-256color" } as NodeJS.ProcessEnv;
-  if (provider?.baseUrl) {
-    env.ANTHROPIC_BASE_URL = provider.baseUrl;
-    if (provider.authToken) env.ANTHROPIC_AUTH_TOKEN = provider.authToken;
-    if (opts.model) {
-      env.ANTHROPIC_DEFAULT_HAIKU_MODEL = opts.model;
-      env.ANTHROPIC_DEFAULT_SONNET_MODEL = opts.model;
-      env.ANTHROPIC_DEFAULT_OPUS_MODEL = opts.model;
-    }
-    // Stop the binary from auto-appending "[1m]" to non-Claude models.
-    env.CLAUDE_CODE_DISABLE_1M_CONTEXT = "1";
-  } else {
-    // Native claude provider: make sure we don't inherit stale gateway
-    // overrides from a parent shell.
-    delete env.ANTHROPIC_BASE_URL;
-    delete env.ANTHROPIC_AUTH_TOKEN;
-    delete env.ANTHROPIC_DEFAULT_HAIKU_MODEL;
-    delete env.ANTHROPIC_DEFAULT_SONNET_MODEL;
-    delete env.ANTHROPIC_DEFAULT_OPUS_MODEL;
-  }
+  const queryOptions: any = {
+    cwd: opts.workingDirectory,
+    abortController: abort,
+    permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
+    settingSources: ["user", "project", "local"],
+    effort: opts.effort,
+    env: { ...process.env, ...buildEnvOverrides({ provider: opts.provider, model: opts.model }) },
+    toolConfig: {
+      askUserQuestion: { previewFormat: "html" as const },
+    },
+  };
+  if (opts.resume) queryOptions.resume = opts.sessionId;
+  else queryOptions.sessionId = opts.sessionId;
+  if (opts.name) queryOptions.extraArgs = { ...(queryOptions.extraArgs ?? {}), name: opts.name };
 
   console.log(
-    `spawn[${opts.provider}${opts.model ? "/" + opts.model : ""}@${opts.effort}]: ${CLAUDE_BIN} ${args.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")} (cwd=${opts.workingDirectory})`,
+    `query[${opts.provider}${opts.model ? "/" + opts.model : ""}@${opts.effort}]: sessionId=${opts.sessionId} resume=${opts.resume} cwd=${opts.workingDirectory}`,
   );
 
-  const pty = ptySpawn(CLAUDE_BIN, args, {
-    name: "xterm-256color",
-    cols: 120,
-    rows: 40,
-    cwd: opts.workingDirectory,
-    env,
-  });
+  const q = query({ prompt: stream, options: queryOptions }) as any;
 
-  let captureBytes = 0;
-  let captured = "";
-  pty.onData((data) => {
-    if (captureBytes < 4000) {
-      captured += data;
-      captureBytes += data.length;
-      if (captureBytes >= 4000 || captured.includes("\n\n")) {
-        const text = captured.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "").trim();
-        if (text) console.log(`session ${opts.sessionId} stdout: ${text.slice(0, 1200)}`);
+  let resolveReady!: () => void;
+  let rejectReady!: (e: unknown) => void;
+  const ready = new Promise<void>((res, rej) => {
+    resolveReady = res;
+    rejectReady = rej;
+  });
+  ready.catch(() => {});
+
+  let enabled = false;
+  const enable = async (reason: string) => {
+    if (enabled) return;
+    enabled = true;
+    try {
+      await q.enableRemoteControl(true);
+      patch(opts.sessionId, { status: "running" });
+      resolveReady();
+      console.log(`session ${opts.sessionId}: remote control enabled (${reason})`);
+    } catch (err) {
+      enabled = false;
+      console.error(`session ${opts.sessionId}: enableRemoteControl failed (${reason})`, err);
+      patch(opts.sessionId, { status: "errored" });
+      rejectReady(err);
+    }
+  };
+
+  // For resumes the SDK may never emit a fresh `system.init`; flip on
+  // remote control after a grace period regardless.
+  if (opts.resume) {
+    setTimeout(() => {
+      enable("resume-timer").catch(() => {});
+    }, 1500);
+  }
+
+  (async () => {
+    try {
+      for await (const msg of q as AsyncIterable<any>) {
+        if (msg?.type === "system" && msg.subtype === "init") {
+          await enable("init");
+        }
+        if (msg?.type === "assistant" || msg?.type === "user") {
+          patch(opts.sessionId, { lastMessageAt: new Date().toISOString() });
+          if (!enabled) await enable("first-message");
+        }
       }
+      patch(opts.sessionId, { status: "stopped" });
+    } catch (err) {
+      if (abort.signal.aborted) {
+        patch(opts.sessionId, { status: "stopped" });
+      } else {
+        console.error(`session ${opts.sessionId}: stream error`, err);
+        patch(opts.sessionId, { status: "errored" });
+      }
+    } finally {
+      running.delete(opts.sessionId);
     }
-  });
-  let resolveExit!: () => void;
-  const exited = new Promise<void>((r) => {
-    resolveExit = r;
-  });
-  pty.onExit(({ exitCode, signal }) => {
-    running.delete(opts.sessionId);
-    const list = load();
-    if (list.find((s) => s.sessionId === opts.sessionId)) {
-      patch(opts.sessionId, {
-        status: exitCode === 0 || signal ? "stopped" : "errored",
-      });
-    }
-    console.log(
-      `session ${opts.sessionId}: pty exited (code=${exitCode}, signal=${signal})`,
-    );
-    resolveExit();
-  });
+  })();
 
   const rs: RunningSession = {
     sessionId: opts.sessionId,
     workingDirectory: opts.workingDirectory,
-    pty,
-    startedAt: new Date().toISOString(),
-    exited,
+    abort,
+    push,
+    close,
+    ready,
+    query: q,
   };
   running.set(opts.sessionId, rs);
-  patch(opts.sessionId, { status: "running" });
-
-  // Persist the title via a custom-title entry in the transcript so the
-  // Claude app shows our chosen name instead of auto-summarizing the
-  // bootstrap message. Delay so the binary has time to create the jsonl.
-  if (opts.name) {
-    const wantedName = opts.name;
-    setTimeout(() => {
-      renameSession(opts.sessionId, wantedName, {
-        dir: opts.workingDirectory,
-      } as any).catch((err) => {
-        console.error(
-          `session ${opts.sessionId}: post-spawn custom-title write failed`,
-          err,
-        );
-      });
-    }, 3000);
-  }
-
   return rs;
 }
 
-async function killSession(
+async function applyName(
   sessionId: string,
-  opts: { graceful?: boolean } = {},
+  workingDirectory: string,
+  name: string | undefined,
 ): Promise<void> {
+  if (!name) return;
+  try {
+    await renameSession(sessionId, name, { dir: workingDirectory } as any);
+    patch(sessionId, { name });
+  } catch (err) {
+    console.error(`session ${sessionId}: rename failed`, err);
+  }
+}
+
+async function killSession(sessionId: string, opts: { graceful?: boolean } = {}): Promise<void> {
   const rs = running.get(sessionId);
   if (!rs) return;
-
-  const wait = (ms: number) =>
-    Promise.race([
-      rs.exited,
-      new Promise((r) => setTimeout(r, ms)),
-    ]);
-
+  running.delete(sessionId);
   if (opts.graceful) {
-    // Send Ctrl-C twice — first interrupts whatever the agent is doing,
-    // second triggers Claude Code's "exit" handler (same as pressing
-    // Ctrl-C twice in a real terminal). /exit doesn't work over pty
-    // because the binary's slash-command parser is keystroke-driven, so
-    // a piped string lands as chat content.
     try {
-      rs.pty.write("\x03");
-    } catch {}
-    await wait(200);
-    try {
-      rs.pty.write("\x03");
-    } catch {}
-    await wait(4000);
-    if (running.has(sessionId)) {
-      try {
-        rs.pty.kill("SIGTERM");
-      } catch {}
-      await wait(1500);
+      await rs.query.enableRemoteControl(false);
+    } catch (err) {
+      console.error(`session ${sessionId}: enableRemoteControl(false) failed`, err);
     }
-  } else {
-    try {
-      rs.pty.kill("SIGTERM");
-    } catch {}
-    await wait(800);
   }
-
-  if (running.has(sessionId)) {
-    try {
-      rs.pty.kill("SIGKILL");
-    } catch {}
-    running.delete(sessionId);
-  }
+  try {
+    rs.abort.abort();
+  } catch {}
+  try {
+    rs.close();
+  } catch {}
 }
 
 /** ─── public API used by index.ts ─── */
@@ -322,7 +357,7 @@ export async function startNew(opts: StartOpts): Promise<TrackedSession> {
     status: "starting",
   };
   upsert(entry);
-  spawnClaude({
+  startQuery({
     sessionId,
     workingDirectory: opts.workingDirectory,
     resume: false,
@@ -330,10 +365,18 @@ export async function startNew(opts: StartOpts): Promise<TrackedSession> {
     provider,
     model: entry.model,
     effort,
-    // Skip initial message: it becomes the auto-summarized title in the
-    // Claude app and overrides --name.
-  });
-  return { ...entry, status: "running" };
+    pushBootstrap: true,
+  })
+    .then(async (rs) => {
+      try {
+        await rs.ready;
+        await applyName(sessionId, opts.workingDirectory, finalName);
+      } catch (err) {
+        console.error(`startNew ${sessionId} init failed`, err);
+      }
+    })
+    .catch((err) => console.error(`startNew ${sessionId} failed`, err));
+  return { ...entry };
 }
 
 export interface BindOpts extends StartOpts {
@@ -360,7 +403,7 @@ export async function bindExisting(opts: BindOpts): Promise<TrackedSession> {
     status: "starting",
   };
   upsert(entry);
-  spawnClaude({
+  startQuery({
     sessionId,
     workingDirectory,
     resume: true,
@@ -368,14 +411,15 @@ export async function bindExisting(opts: BindOpts): Promise<TrackedSession> {
     provider,
     model: entry.model,
     effort,
-  });
-  return { ...entry, status: "running" };
+    pushBootstrap: false,
+  }).catch((err) => console.error(`bindExisting ${sessionId} failed`, err));
+  return { ...entry };
 }
 
 export async function removeSession(
   sessionId: string,
 ): Promise<{ removed: boolean }> {
-  await killSession(sessionId);
+  await killSession(sessionId, { graceful: true });
   const list = load();
   const next = list.filter((s) => s.sessionId !== sessionId);
   const removed = next.length !== list.length;
@@ -397,7 +441,9 @@ export async function renameAny(
   const workingDirectory = tracked?.workingDirectory ?? workingDirectoryHint;
   if (!workingDirectory) throw new Error("workingDirectory required for rename");
 
+  // Stop the running query so the SDK releases the transcript file.
   await killSession(sessionId);
+  await new Promise((r) => setTimeout(r, 250));
 
   let sdkRename: "ok" | "error" | "skipped" = "skipped";
   const trimmed = newName?.trim();
@@ -413,7 +459,7 @@ export async function renameAny(
 
   if (tracked) {
     patch(sessionId, { name: trimmed || undefined });
-    spawnClaude({
+    startQuery({
       sessionId,
       workingDirectory,
       resume: true,
@@ -421,8 +467,10 @@ export async function renameAny(
       provider: tracked.provider ?? DEFAULT_PROVIDER,
       model: tracked.model,
       effort: (tracked.effort ?? DEFAULT_EFFORT) as Effort,
-      // No startup message on rename — it's not a fresh session start.
-    });
+      pushBootstrap: false,
+    }).catch((err) =>
+      console.error(`renameAny ${sessionId}: restart failed`, err),
+    );
   }
 
   return { sdkRename, tracked: !!tracked };
@@ -451,7 +499,7 @@ export async function resumeAllTracked(): Promise<void> {
   for (const entry of valid) {
     if (running.has(entry.sessionId)) continue;
     try {
-      spawnClaude({
+      startQuery({
         sessionId: entry.sessionId,
         workingDirectory: entry.workingDirectory,
         resume: true,
@@ -459,8 +507,8 @@ export async function resumeAllTracked(): Promise<void> {
         provider: entry.provider ?? DEFAULT_PROVIDER,
         model: entry.model,
         effort: (entry.effort ?? DEFAULT_EFFORT) as Effort,
-        // No startup message on reboot resume.
-      });
+        pushBootstrap: false,
+      }).catch((err) => console.error(`resume ${entry.sessionId} failed`, err));
       console.log(`resumed remote-control session ${entry.sessionId}`);
     } catch (err) {
       console.error(`failed to resume ${entry.sessionId}`, err);
@@ -471,18 +519,11 @@ export async function resumeAllTracked(): Promise<void> {
 export async function shutdownAll(timeoutMs = 8000): Promise<void> {
   const sessions = [...running.values()];
   if (!sessions.length) return;
-  console.log(`shutdown: stopping ${sessions.length} sessions gracefully...`);
+  console.log(`shutdown: gracefully disconnecting ${sessions.length} sessions...`);
   await Promise.race([
     Promise.all(sessions.map((rs) => killSession(rs.sessionId, { graceful: true }))),
     new Promise((r) => setTimeout(r, timeoutMs)),
   ]);
-  // Force-kill anything still alive after the budget.
-  const leftover = [...running.values()];
-  for (const rs of leftover) {
-    try {
-      rs.pty.kill("SIGKILL");
-    } catch {}
-  }
   running.clear();
   console.log("shutdown: done");
 }

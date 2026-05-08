@@ -212,13 +212,12 @@ async function startQuery(opts: {
   // as a normal assistant message — which the Claude app does render
   // correctly. Auto-allow everything else (we still set bypassPermissions
   // for the rest).
-  const isNativeClaudeProvider = !provider?.baseUrl;
+  const endpoint = resolveEndpoint(opts.provider, opts.model);
+  const isNativeClaudeProvider = !endpoint.baseUrl;
   // The bridge translates Anthropic /v1/messages -> OpenAI /v1/responses,
   // which means web_search rides the upstream's native built-in. So
   // sessions routing through the bridge can let WebSearch through.
-  const goesThroughBridge =
-    resolveEndpoint(opts.provider, opts.model).baseUrl?.includes("bridge") ??
-    false;
+  const goesThroughBridge = endpoint.baseUrl?.includes("bridge") ?? false;
   const canUseTool = async (toolName: string, input: any) => {
     if (toolName === "AskUserQuestion") {
       const count = input?.questions?.length ?? 0;

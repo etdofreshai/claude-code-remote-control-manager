@@ -262,10 +262,17 @@ async function killSession(
     ]);
 
   if (opts.graceful) {
-    // Try to make the CLI exit cleanly so the remote-control bridge
-    // unregisters before the process dies.
+    // Send Ctrl-C twice — first interrupts whatever the agent is doing,
+    // second triggers Claude Code's "exit" handler (same as pressing
+    // Ctrl-C twice in a real terminal). /exit doesn't work over pty
+    // because the binary's slash-command parser is keystroke-driven, so
+    // a piped string lands as chat content.
     try {
-      rs.pty.write("/exit\r");
+      rs.pty.write("\x03");
+    } catch {}
+    await wait(200);
+    try {
+      rs.pty.write("\x03");
     } catch {}
     await wait(4000);
     if (running.has(sessionId)) {

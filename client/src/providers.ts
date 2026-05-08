@@ -27,6 +27,7 @@ const LITELLM_DEFAULT_BASE_URL = "https://litellm.etdofresh.com";
 
 function defaultProviders(): ProvidersConfig {
   const liteToken = process.env.LITELLM_TOKEN?.trim();
+  const liteUrl = process.env.LITELLM_BASE_URL?.trim() || LITELLM_DEFAULT_BASE_URL;
   return {
     claude: {
       models: [
@@ -36,15 +37,10 @@ function defaultProviders(): ProvidersConfig {
         "claude-sonnet-4-6",
       ],
     },
-    codex: {
-      baseUrl: process.env.CODEX_BASE_URL?.trim() || LITELLM_DEFAULT_BASE_URL,
-      authToken: process.env.CODEX_AUTH_TOKEN?.trim() || liteToken,
-      models: ["codex"],
-    },
-    glm: {
-      baseUrl: process.env.GLM_BASE_URL?.trim() || LITELLM_DEFAULT_BASE_URL,
-      authToken: process.env.GLM_AUTH_TOKEN?.trim() || liteToken,
-      models: ["glm"],
+    litellm: {
+      baseUrl: liteUrl,
+      authToken: liteToken,
+      models: ["codex", "glm"],
     },
   };
 }

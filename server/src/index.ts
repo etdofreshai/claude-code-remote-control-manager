@@ -207,12 +207,18 @@ await app.register(fastifyStatic, {
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 const INDEX_HTML = readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
 
-const isAuthed = (req: any) => req.cookies?.[SESSION_COOKIE] === SESSION_VALUE;
+const isAuthed = (req: any) => {
+  if (req.cookies?.[SESSION_COOKIE] === SESSION_VALUE) return true;
+  const auth = req.headers?.authorization;
+  if (typeof auth === "string" && auth === `Bearer ${SESSION_VALUE}`) return true;
+  return false;
+};
 const isAgentReq = (req: any) => req.headers.authorization === `Bearer ${CLIENT_TOKEN}`;
 
 app.addHook("preHandler", async (req, reply) => {
   const url = req.url;
   if (
+    url === "/" ||
     url === "/login" ||
     url.startsWith("/static/") ||
     url === "/api/login" ||
@@ -224,11 +230,8 @@ app.addHook("preHandler", async (req, reply) => {
     if (!isAgentReq(req)) reply.code(401).send({ error: "unauthorized" });
     return;
   }
-  if (url === "/" || url.startsWith("/api/")) {
-    if (!isAuthed(req)) {
-      if (url.startsWith("/api/")) reply.code(401).send({ error: "unauthorized" });
-      else reply.redirect("/login");
-    }
+  if (url.startsWith("/api/")) {
+    if (!isAuthed(req)) reply.code(401).send({ error: "unauthorized" });
   }
 });
 
@@ -236,22 +239,53 @@ app.get("/healthz", async () => ({ ok: true }));
 
 app.get("/login", async (_req, reply) => {
   reply.type("text/html").send(`<!doctype html><html><head><meta charset="utf-8"><title>Login</title><link rel="stylesheet" href="/static/styles.css"></head><body class="login">
-  <form method="post" action="/api/login" class="card">
+  <form id="login-form" class="card">
     <h1>Claude Code Remote</h1>
     <input type="password" name="password" placeholder="Password" autofocus required>
     <button>Sign in</button>
-  </form></body></html>`);
+    <p id="login-error" style="color:#fc8181;display:none;margin:8px 0 0;font-size:12px;"></p>
+  </form>
+  <script>
+    if (localStorage.getItem("ccrcm_token")) location.href = "/";
+    document.getElementById("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const password = e.target.password.value;
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password }),
+        });
+        if (!res.ok) throw new Error("Wrong password");
+        const { token } = await res.json();
+        localStorage.setItem("ccrcm_token", token);
+        location.href = "/";
+      } catch (err) {
+        const el = document.getElementById("login-error");
+        el.textContent = String(err.message || err);
+        el.style.display = "block";
+      }
+    });
+  </script>
+  </body></html>`);
 });
 
 app.post("/api/login", async (req, reply) => {
   const body = (req.body ?? {}) as { password?: string };
   if (body.password !== UI_PASSWORD) {
-    reply.code(401).type("text/html").send("Wrong password. <a href=/login>Try again</a>");
+    reply.code(401).send({ error: "wrong password" });
     return;
   }
+  // Also set the cookie so server-rendered routes still work for legacy
+  // clients, but the canonical mechanism is now Bearer + localStorage.
   reply
-    .setCookie(SESSION_COOKIE, SESSION_VALUE, { path: "/", httpOnly: true, sameSite: "lax" })
-    .redirect("/");
+    .setCookie(SESSION_COOKIE, SESSION_VALUE, {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 30,
+    })
+    .send({ token: SESSION_VALUE });
 });
 
 app.post("/api/logout", async (_req, reply) => {

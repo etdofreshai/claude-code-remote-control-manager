@@ -4,10 +4,25 @@ let selected = null;
 let lastFillKey = null;
 let lastClients = [];
 
+function getToken() {
+  return localStorage.getItem("ccrcm_token");
+}
+
+if (!getToken()) {
+  location.replace("/login");
+}
+
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers ?? {}) };
   if (opts.body != null) headers["content-type"] = "application/json";
+  const tok = getToken();
+  if (tok) headers["authorization"] = `Bearer ${tok}`;
   const res = await fetch(path, { ...opts, headers });
+  if (res.status === 401) {
+    localStorage.removeItem("ccrcm_token");
+    location.replace("/login");
+    throw new Error("unauthorized");
+  }
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.headers.get("content-type")?.includes("json") ? res.json() : res.text();
 }
@@ -397,7 +412,12 @@ $("#browse-next").addEventListener("click", () => {
   loadBrowsePage();
 });
 $("#logout").addEventListener("click", async () => {
-  await api("/api/logout", { method: "POST" });
+  try {
+    await api("/api/logout", { method: "POST" });
+  } catch {
+    /* ignore */
+  }
+  localStorage.removeItem("ccrcm_token");
   location.href = "/login";
 });
 

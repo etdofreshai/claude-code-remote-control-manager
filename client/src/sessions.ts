@@ -202,6 +202,24 @@ function spawnClaude(opts: {
   };
   running.set(opts.sessionId, rs);
   patch(opts.sessionId, { status: "running" });
+
+  // Persist the title via a custom-title entry in the transcript so the
+  // Claude app shows our chosen name instead of auto-summarizing the
+  // bootstrap message. Delay so the binary has time to create the jsonl.
+  if (opts.name) {
+    const wantedName = opts.name;
+    setTimeout(() => {
+      renameSession(opts.sessionId, wantedName, {
+        dir: opts.workingDirectory,
+      } as any).catch((err) => {
+        console.error(
+          `session ${opts.sessionId}: post-spawn custom-title write failed`,
+          err,
+        );
+      });
+    }, 3000);
+  }
+
   return rs;
 }
 

@@ -206,6 +206,24 @@ async function startQuery(opts: {
     push(bootstrapMessage({ provider: opts.provider, model: opts.model, effort: opts.effort }));
   }
 
+  // Intercept AskUserQuestion: the picker round-trip is broken in
+  // Anthropic's remote-control bridge (open issues #28508, #33625, #35125).
+  // Deny it with a redirect message so the model rephrases the question
+  // as a normal assistant message — which the Claude app does render
+  // correctly. Auto-allow everything else (we still set bypassPermissions
+  // for the rest).
+  const canUseTool = async (toolName: string, input: any) => {
+    if (toolName === "AskUserQuestion") {
+      console.log(`session ${opts.sessionId}: redirecting AskUserQuestion to chat (questions=${input?.questions?.length ?? 0})`);
+      return {
+        behavior: "deny" as const,
+        message:
+          "AskUserQuestion is unavailable in this remote-control session due to an unfixed Claude bridge bug. Instead, ask your question(s) directly in your next assistant message. Phrase the options as a numbered list and wait for the user's reply.",
+      };
+    }
+    return { behavior: "allow" as const, updatedInput: input };
+  };
+
   const queryOptions: any = {
     cwd: opts.workingDirectory,
     abortController: abort,
@@ -214,6 +232,7 @@ async function startQuery(opts: {
     settingSources: ["user", "project", "local"],
     effort: opts.effort,
     env: { ...process.env, ...buildEnvOverrides({ provider: opts.provider, model: opts.model }) },
+    canUseTool,
     toolConfig: {
       askUserQuestion: { previewFormat: "html" as const },
     },

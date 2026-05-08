@@ -212,6 +212,7 @@ async function startQuery(opts: {
   // as a normal assistant message — which the Claude app does render
   // correctly. Auto-allow everything else (we still set bypassPermissions
   // for the rest).
+  const isNativeClaudeProvider = !provider?.baseUrl;
   const canUseTool = async (toolName: string, input: any) => {
     if (toolName === "AskUserQuestion") {
       const count = input?.questions?.length ?? 0;
@@ -235,6 +236,27 @@ async function startQuery(opts: {
           "4. Stop and wait for the user's reply." +
           totalLine +
           "\n\nDo not invoke AskUserQuestion again for this exchange.",
+      };
+    }
+    if (toolName === "WebSearch" && !isNativeClaudeProvider) {
+      const q = input?.query ?? "";
+      console.log(
+        `session ${opts.sessionId}: redirecting WebSearch to Bash (provider=${opts.provider}, query="${String(q).slice(0, 80)}")`,
+      );
+      return {
+        behavior: "deny" as const,
+        message:
+          "WebSearch is unavailable on this provider — it's an Anthropic server-side tool and the current LiteLLM gateway has no equivalent backend. " +
+          "Use the Bash tool to do real web fetches instead. Concrete suggestions:\n" +
+          "\n" +
+          "  • For news / general search: curl a results page or RSS feed (BBC, NPR, AP, Hacker News, Reddit JSON, etc.) and extract the relevant items.\n" +
+          "  • For a specific URL: curl -sL <url> | sed 's/<[^>]*>//g' | head -200\n" +
+          "  • For Hacker News top stories: curl -s 'https://hacker-news.firebaseio.com/v0/topstories.json' | head, then fetch /v0/item/<id>.json per id.\n" +
+          "  • For DuckDuckGo HTML: curl -sL 'https://duckduckgo.com/html/?q=<urlencoded query>' and strip tags.\n" +
+          "\n" +
+          "Open your response with this exact disclaimer line: " +
+          "\"⚠️ WebSearch isn't supported on this provider — fetching results via curl instead.\" " +
+          "Then run the Bash commands you need and report the findings with source URLs. Do not invoke WebSearch again for this exchange.",
       };
     }
     return { behavior: "allow" as const, updatedInput: input };

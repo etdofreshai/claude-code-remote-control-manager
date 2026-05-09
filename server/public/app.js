@@ -65,11 +65,18 @@ function flashCopied(el, originalContent) {
   }, 900);
 }
 
+function resolveSessionEndpoint(clientName, providerName, modelName) {
+  const c = (lastClients ?? []).find((x) => x.name === clientName);
+  const p = c?.providers?.[providerName];
+  if (!p) return {};
+  const ovBase = modelName && p.modelOverrides?.[modelName]?.baseUrl;
+  return { baseUrl: ovBase ?? p.baseUrl };
+}
+
 /**
- * Build a `claude` CLI command-line that resumes this session locally,
- * matching the env we'd spawn here. Provider/model are surfaced as a
- * leading export comment so the user knows what to set if they're not
- * using the default Claude auth.
+ * Build a paste-and-run shell snippet that resumes this session locally,
+ * mirroring the env we'd spawn here. Auth token is intentionally a
+ * placeholder — sensitive value never leaves the client.
  */
 function buildResumeCommand(s) {
   const args = ["claude", "--resume", s.sessionId];
@@ -77,11 +84,23 @@ function buildResumeCommand(s) {
   if (s.effort) args.push("--effort", s.effort);
   args.push("--remote-control");
   const cmd = args.join(" ");
+
   const lines = [];
-  // Provider hints (user can mirror into shell env if needed).
-  if (s.provider && s.provider !== "claude") lines.push(`# provider: ${s.provider}`);
+  if (s.provider) lines.push(`# provider: ${s.provider}`);
   if (s.model) lines.push(`# model:    ${s.model}`);
-  // Real cd, not a comment, so paste-and-run lands in the right dir.
+
+  const { baseUrl } = resolveSessionEndpoint(selected, s.provider, s.model);
+  if (baseUrl) {
+    lines.push(`export ANTHROPIC_BASE_URL=${JSON.stringify(baseUrl)}`);
+    lines.push(`export ANTHROPIC_AUTH_TOKEN="<your-token>"`);
+    if (s.model) {
+      lines.push(`export ANTHROPIC_DEFAULT_HAIKU_MODEL=${JSON.stringify(s.model)}`);
+      lines.push(`export ANTHROPIC_DEFAULT_SONNET_MODEL=${JSON.stringify(s.model)}`);
+      lines.push(`export ANTHROPIC_DEFAULT_OPUS_MODEL=${JSON.stringify(s.model)}`);
+    }
+    lines.push(`export CLAUDE_CODE_DISABLE_1M_CONTEXT=1`);
+  }
+
   if (s.workingDirectory) lines.push(`cd ${JSON.stringify(s.workingDirectory)}`);
   lines.push(cmd);
   return lines.join("\n");

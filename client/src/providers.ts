@@ -96,12 +96,31 @@ export function loadProviders(): ProvidersConfig {
 /** Sanitized form to advertise to the server (no auth tokens). */
 export function publicProviders(): Record<
   string,
-  { baseUrl?: string; models: string[] }
+  {
+    baseUrl?: string;
+    models: string[];
+    modelOverrides?: Record<string, { baseUrl?: string }>;
+  }
 > {
   const cfg = loadProviders();
-  const out: Record<string, { baseUrl?: string; models: string[] }> = {};
+  const out: Record<
+    string,
+    {
+      baseUrl?: string;
+      models: string[];
+      modelOverrides?: Record<string, { baseUrl?: string }>;
+    }
+  > = {};
   for (const [name, p] of Object.entries(cfg)) {
-    out[name] = { baseUrl: p.baseUrl, models: p.models ?? [] };
+    const modelOverrides: Record<string, { baseUrl?: string }> = {};
+    for (const [m, ov] of Object.entries(p.modelOverrides ?? {})) {
+      if (ov?.baseUrl) modelOverrides[m] = { baseUrl: ov.baseUrl };
+    }
+    out[name] = {
+      baseUrl: p.baseUrl,
+      models: p.models ?? [],
+      modelOverrides: Object.keys(modelOverrides).length ? modelOverrides : undefined,
+    };
   }
   return out;
 }

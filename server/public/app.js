@@ -77,12 +77,14 @@ function buildResumeCommand(s) {
   if (s.effort) args.push("--effort", s.effort);
   args.push("--remote-control");
   const cmd = args.join(" ");
+  const lines = [];
   // Provider hints (user can mirror into shell env if needed).
-  const hints = [];
-  if (s.provider && s.provider !== "claude") hints.push(`# provider: ${s.provider}`);
-  if (s.model) hints.push(`# model:    ${s.model}`);
-  if (s.workingDirectory) hints.push(`# cd ${JSON.stringify(s.workingDirectory)}`);
-  return [...hints, cmd].join("\n");
+  if (s.provider && s.provider !== "claude") lines.push(`# provider: ${s.provider}`);
+  if (s.model) lines.push(`# model:    ${s.model}`);
+  // Real cd, not a comment, so paste-and-run lands in the right dir.
+  if (s.workingDirectory) lines.push(`cd ${JSON.stringify(s.workingDirectory)}`);
+  lines.push(cmd);
+  return lines.join("\n");
 }
 
 function showResult(text) {

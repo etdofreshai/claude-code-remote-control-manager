@@ -214,10 +214,11 @@ async function startQuery(opts: {
   // for the rest).
   const endpoint = resolveEndpoint(opts.provider, opts.model);
   const isNativeClaudeProvider = !endpoint.baseUrl;
-  // The bridge translates Anthropic /v1/messages -> OpenAI /v1/responses,
-  // which means web_search rides the upstream's native built-in. So
-  // sessions routing through the bridge can let WebSearch through.
-  const goesThroughBridge = endpoint.baseUrl?.includes("bridge") ?? false;
+  // All currently-supported gateways pass web_search through to a real
+  // search backend (Anthropic native, z.ai/anthropic native, bridge ->
+  // chatgpt responses). So we no longer block WebSearch on non-claude
+  // routes.
+  const supportsWebSearch = true;
   const canUseTool = async (toolName: string, input: any) => {
     if (toolName === "AskUserQuestion") {
       const count = input?.questions?.length ?? 0;
@@ -243,7 +244,7 @@ async function startQuery(opts: {
           "\n\nDo not invoke AskUserQuestion again for this exchange.",
       };
     }
-    if (toolName === "WebSearch" && !isNativeClaudeProvider && !goesThroughBridge) {
+    if (toolName === "WebSearch" && !isNativeClaudeProvider && !supportsWebSearch) {
       const q = input?.query ?? "";
       console.log(
         `session ${opts.sessionId}: redirecting WebSearch to Bash (provider=${opts.provider}, query="${String(q).slice(0, 80)}")`,

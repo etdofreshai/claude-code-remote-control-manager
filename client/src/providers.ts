@@ -32,28 +32,37 @@ export type ProvidersConfig = Record<string, ProviderConfig>;
 
 const LITELLM_DEFAULT_BASE_URL = "https://litellm.etdofresh.com";
 const BRIDGE_DEFAULT_BASE_URL = "https://ccrcm-bridge.etdofresh.com";
+const ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
 
 function defaultProviders(): ProvidersConfig {
   const liteToken = process.env.LITELLM_TOKEN?.trim();
   const liteUrl = process.env.LITELLM_BASE_URL?.trim() || LITELLM_DEFAULT_BASE_URL;
   const bridgeUrl =
     process.env.BRIDGE_BASE_URL?.trim() || BRIDGE_DEFAULT_BASE_URL;
+  const zaiToken = process.env.ZAI_API_KEY?.trim();
+  const zaiUrl = process.env.ZAI_BASE_URL?.trim() || ZAI_ANTHROPIC_BASE_URL;
   return {
     claude: {
+      // glm-5.1 sits in the Claude provider for UX simplicity — it's
+      // routed via z.ai's Anthropic-compatible endpoint, so the binary
+      // still speaks /v1/messages and treats it like any Claude model.
       models: [
         "claude-opus-4-7",
         "claude-sonnet-4-7",
         "claude-haiku-4-5",
         "claude-sonnet-4-6",
+        "glm-5.1",
       ],
+      modelOverrides: {
+        "glm-5.1": { baseUrl: zaiUrl, authToken: zaiToken },
+      },
     },
     litellm: {
       baseUrl: liteUrl,
       authToken: liteToken,
-      models: ["codex", "glm"],
+      // codex stays on litellm because it needs the responses-API bridge.
+      models: ["codex"],
       modelOverrides: {
-        // codex needs the bridge so /v1/messages -> /v1/responses
-        // translation reaches the chatgpt upstream's web_search.
         codex: { baseUrl: bridgeUrl, authToken: liteToken },
       },
     },

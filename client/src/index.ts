@@ -5,6 +5,7 @@ import {
   removeSession,
   renameTracked,
   renameAny,
+  refreshSession,
   listTracked,
   resumeAllTracked,
   shutdownAll,
@@ -70,7 +71,7 @@ async function pollOnce(): Promise<void> {
   if (!res.ok) throw new Error(`poll ${res.status}`);
   const cmd = (await res.json()) as {
     id: string;
-    type: "new" | "bind" | "remove" | "rename" | "list";
+    type: "new" | "bind" | "remove" | "rename" | "list" | "refresh";
     payload: {
       workingDirectory?: string;
       sessionId?: string;
@@ -117,6 +118,9 @@ async function pollOnce(): Promise<void> {
         cmd.payload.name,
         cmd.payload.workingDirectory,
       );
+    } else if (cmd.type === "refresh") {
+      if (!cmd.payload.sessionId) throw new Error("sessionId required for refresh");
+      result = await refreshSession(cmd.payload.sessionId);
     } else if (cmd.type === "list") {
       if (!cmd.payload.workingDirectory)
         throw new Error("workingDirectory required for list");

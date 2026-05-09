@@ -41,3 +41,8 @@ li { display: flex; justify-content: space-between; align-items: flex-start; gap
 pre { white-space: pre-wrap; word-break: break-word; background: #0a0b0e; border-radius: 6px; padding: 12px; max-height: 40vh; overflow: auto; }
 .login { display: grid; place-items: center; height: 100vh; }
 .card { background: #15171c; padding: 24px; border-radius: 8px; border: 1px solid #23262d; width: 320px; }
+
+.session-meta { display: block; min-width: 0; word-break: break-all; }
+.session-meta .copyable { cursor: pointer; user-select: none; transition: color 0.15s ease, background 0.15s ease; padding: 1px 3px; border-radius: 3px; }
+.session-meta .copyable:hover { color: #5dadec; background: rgba(93, 173, 236, 0.08); }
+.session-meta .copyable.copied-flash { color: #4ade80; background: rgba(74, 222, 128, 0.12); }

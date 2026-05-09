@@ -113,7 +113,7 @@ loadAgents();
 
 interface AgentCommand {
   id: string;
-  type: "new" | "bind" | "remove" | "rename" | "list";
+  type: "new" | "bind" | "remove" | "rename" | "list" | "refresh";
   payload: {
     workingDirectory?: string;
     sessionId?: string;
@@ -415,6 +415,18 @@ app.post("/api/clients/:name/sessions/:sessionId/rename", async (req) => {
       name: newName?.trim() || undefined,
       workingDirectory,
     },
+  };
+  return enqueue(name, cmd);
+});
+
+app.post("/api/clients/:name/sessions/:sessionId/refresh", async (req) => {
+  const { name, sessionId } = req.params as { name: string; sessionId: string };
+  const agent = agents.get(name);
+  if (!agent) throw new Error(`unknown client: ${name}`);
+  const cmd: AgentCommand = {
+    id: randomUUID(),
+    type: "refresh",
+    payload: { sessionId },
   };
   return enqueue(name, cmd);
 });

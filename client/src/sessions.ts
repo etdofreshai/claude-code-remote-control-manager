@@ -550,6 +550,42 @@ export async function renameTracked(
   return { ...entry, name: newName?.trim() || undefined, sdkRename: r.sdkRename };
 }
 
+/**
+ * Refresh a session: kill the running query and respawn it (resume).
+ * The SDK process holds its session state in memory; when a session is
+ * interacted with from elsewhere (Claude app, CLI), our cached process
+ * doesn't see those new messages until it re-reads the on-disk transcript.
+ * Killing + respawning forces a fresh load.
+ */
+export async function refreshSession(
+  sessionId: string,
+): Promise<{ refreshed: boolean }> {
+  if (!isUuid(sessionId)) throw new Error(`invalid session id: ${sessionId}`);
+  const list = load();
+  const tracked = list.find((s) => s.sessionId === sessionId);
+  if (!tracked) return { refreshed: false };
+
+  await killSession(sessionId);
+  // Brief settle so the SDK child process releases the transcript file
+  // before the resume reads it.
+  await new Promise((r) => setTimeout(r, 250));
+
+  startQuery({
+    sessionId,
+    workingDirectory: tracked.workingDirectory,
+    resume: true,
+    name: tracked.name,
+    provider: tracked.provider ?? DEFAULT_PROVIDER,
+    model: tracked.model,
+    effort: (tracked.effort ?? DEFAULT_EFFORT) as Effort,
+    pushBootstrap: false,
+  }).catch((err) =>
+    console.error(`refreshSession ${sessionId}: restart failed`, err),
+  );
+
+  return { refreshed: true };
+}
+
 export async function resumeAllTracked(): Promise<void> {
   const list = load();
   const valid = list.filter((s) => isUuid(s.sessionId));

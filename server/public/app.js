@@ -29,6 +29,63 @@ async function api(path, opts = {}) {
 
 const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
 
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through */
+  }
+  // Fallback for non-HTTPS / older browsers.
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand("copy");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
+function flashCopied(el, originalContent) {
+  const original = originalContent ?? el.textContent;
+  el.textContent = "✓ copied";
+  el.classList.add("copied-flash");
+  setTimeout(() => {
+    el.textContent = original;
+    el.classList.remove("copied-flash");
+  }, 900);
+}
+
+/**
+ * Build a `claude` CLI command-line that resumes this session locally,
+ * matching the env we'd spawn here. Provider/model are surfaced as a
+ * leading export comment so the user knows what to set if they're not
+ * using the default Claude auth.
+ */
+function buildResumeCommand(s) {
+  const args = ["claude", "--resume", s.sessionId];
+  if (s.workingDirectory) args.push("--add-dir", JSON.stringify(s.workingDirectory));
+  if (s.effort) args.push("--effort", s.effort);
+  if (s.model) args.push("--model", s.model);
+  args.push("--remote-control");
+  const cmd = args.join(" ");
+  // Provider hints (user can mirror into shell env if needed).
+  const hints = [];
+  if (s.provider && s.provider !== "claude") hints.push(`# provider: ${s.provider}`);
+  if (s.model) hints.push(`# model:    ${s.model}`);
+  if (s.workingDirectory) hints.push(`# cd ${JSON.stringify(s.workingDirectory)}`);
+  return [...hints, cmd].join("\n");
+}
+
 function showResult(text) {
   const el = $("#result");
   el.textContent = text;
@@ -122,14 +179,90 @@ function renderSessions(c) {
   }
   for (const s of sessions) {
     const li = document.createElement("li");
-    const title = s.name ? `<strong>${s.name}</strong><br>` : "";
+
+    const left = document.createElement("span");
+    left.className = "session-meta";
+
+    if (s.name) {
+      const titleEl = document.createElement("strong");
+      titleEl.textContent = s.name;
+      titleEl.className = "copyable";
+      titleEl.title = "Click to copy title";
+      titleEl.onclick = async (e) => {
+        e.stopPropagation();
+        if (await copyToClipboard(s.name)) flashCopied(titleEl, s.name);
+      };
+      left.appendChild(titleEl);
+      left.appendChild(document.createElement("br"));
+    }
+
+    const idEl = document.createElement("code");
+    idEl.textContent = s.sessionId;
+    idEl.className = "copyable";
+    idEl.title = "Click to copy session id";
+    idEl.onclick = async (e) => {
+      e.stopPropagation();
+      if (await copyToClipboard(s.sessionId)) flashCopied(idEl, s.sessionId);
+    };
+    left.appendChild(idEl);
+    left.appendChild(document.createElement("br"));
+
+    const wdEl = document.createElement("small");
+    wdEl.textContent = s.workingDirectory;
+    left.appendChild(wdEl);
+
     const providerBits = [s.provider, s.model, s.effort && `effort:${s.effort}`]
       .filter(Boolean)
       .join(" · ");
-    const providerLine = providerBits ? `<br><small>${providerBits}</small>` : "";
-    li.innerHTML = `<span>${title}<code>${s.sessionId}</code><br><small>${s.workingDirectory}</small>${providerLine}<br><small>${s.status ?? "—"} · last ${fmtTime(s.lastMessageAt)}</small></span>`;
+    if (providerBits) {
+      left.appendChild(document.createElement("br"));
+      const provEl = document.createElement("small");
+      provEl.textContent = providerBits;
+      left.appendChild(provEl);
+    }
+
+    left.appendChild(document.createElement("br"));
+    const statusEl = document.createElement("small");
+    statusEl.textContent = `${s.status ?? "—"} · last ${fmtTime(s.lastMessageAt)}`;
+    left.appendChild(statusEl);
+
+    li.appendChild(left);
+
     const btns = document.createElement("div");
     btns.className = "btn-stack";
+
+    const refreshBtn = document.createElement("button");
+    refreshBtn.textContent = "Refresh";
+    refreshBtn.className = "btn-secondary";
+    refreshBtn.title = "Reload session state from disk (use after editing from another client)";
+    refreshBtn.onclick = async (e) => {
+      e.stopPropagation();
+      refreshBtn.disabled = true;
+      try {
+        const r = await api(
+          `/api/clients/${encodeURIComponent(selected)}/sessions/${encodeURIComponent(s.sessionId)}/refresh`,
+          { method: "POST" },
+        );
+        showResult(JSON.stringify(r, null, 2));
+        loadClients();
+      } catch (err) {
+        showResult(String(err));
+      } finally {
+        refreshBtn.disabled = false;
+      }
+    };
+
+    const copyResumeBtn = document.createElement("button");
+    copyResumeBtn.textContent = "Copy Resume";
+    copyResumeBtn.className = "btn-secondary";
+    copyResumeBtn.title = "Copy a `claude --resume` command-line for this session";
+    copyResumeBtn.onclick = async (e) => {
+      e.stopPropagation();
+      const cmd = buildResumeCommand(s);
+      if (await copyToClipboard(cmd)) {
+        flashCopied(copyResumeBtn, "Copy Resume");
+      }
+    };
 
     const renameBtn = document.createElement("button");
     renameBtn.textContent = "Rename";
@@ -176,6 +309,8 @@ function renderSessions(c) {
       }
     };
 
+    btns.appendChild(refreshBtn);
+    btns.appendChild(copyResumeBtn);
     btns.appendChild(renameBtn);
     btns.appendChild(removeBtn);
     li.appendChild(btns);
@@ -258,13 +393,20 @@ async function send(form, route) {
     });
     showResult(JSON.stringify(r, null, 2));
     form.reset();
-    // Re-fill workingDirectory + provider/model/effort selects after reset.
+    // Re-fill workingDirectory + provider/model/effort selects + name
+    // prefix after reset, so the next submission starts from a sensible
+    // default instead of an empty form.
     const def = defaultWorkingDirFor(selected);
     for (const inp of form.querySelectorAll('input[name="workingDirectory"]')) {
       inp.value = def;
     }
     const c = lastClients.find((x) => x.name === selected);
     if (c) populateProviderSelects(c);
+    const prefix = prefixFor(selected);
+    if (prefix) {
+      const nameInput = form.querySelector('input[name="name"]');
+      if (nameInput && !nameInput.value) nameInput.value = prefix;
+    }
     form.classList.add("hidden");
     loadClients();
   } catch (err) {

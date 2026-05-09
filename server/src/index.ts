@@ -28,7 +28,9 @@ interface TrackedSession {
 
 interface ProviderInfo {
   baseUrl?: string;
+  authToken?: string;
   models: string[];
+  modelOverrides?: Record<string, { baseUrl?: string; authToken?: string }>;
 }
 
 interface Agent {

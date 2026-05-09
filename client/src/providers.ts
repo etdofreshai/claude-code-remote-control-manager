@@ -93,13 +93,20 @@ export function loadProviders(): ProvidersConfig {
   }
 }
 
-/** Sanitized form to advertise to the server (no auth tokens). */
+/**
+ * Form advertised to the server. Includes auth tokens — the UI uses them
+ * to surface a paste-and-run "Copy Resume" command. Only authenticated
+ * UI sessions can read this (the server requires Bearer + cookie auth on
+ * /api/clients). If you want a stricter posture, drop authToken from
+ * this projection.
+ */
 export function publicProviders(): Record<
   string,
   {
     baseUrl?: string;
+    authToken?: string;
     models: string[];
-    modelOverrides?: Record<string, { baseUrl?: string }>;
+    modelOverrides?: Record<string, { baseUrl?: string; authToken?: string }>;
   }
 > {
   const cfg = loadProviders();
@@ -107,17 +114,20 @@ export function publicProviders(): Record<
     string,
     {
       baseUrl?: string;
+      authToken?: string;
       models: string[];
-      modelOverrides?: Record<string, { baseUrl?: string }>;
+      modelOverrides?: Record<string, { baseUrl?: string; authToken?: string }>;
     }
   > = {};
   for (const [name, p] of Object.entries(cfg)) {
-    const modelOverrides: Record<string, { baseUrl?: string }> = {};
+    const modelOverrides: Record<string, { baseUrl?: string; authToken?: string }> = {};
     for (const [m, ov] of Object.entries(p.modelOverrides ?? {})) {
-      if (ov?.baseUrl) modelOverrides[m] = { baseUrl: ov.baseUrl };
+      if (ov?.baseUrl || ov?.authToken)
+        modelOverrides[m] = { baseUrl: ov.baseUrl, authToken: ov.authToken };
     }
     out[name] = {
       baseUrl: p.baseUrl,
+      authToken: p.authToken,
       models: p.models ?? [],
       modelOverrides: Object.keys(modelOverrides).length ? modelOverrides : undefined,
     };

@@ -69,8 +69,11 @@ function resolveSessionEndpoint(clientName, providerName, modelName) {
   const c = (lastClients ?? []).find((x) => x.name === clientName);
   const p = c?.providers?.[providerName];
   if (!p) return {};
-  const ovBase = modelName && p.modelOverrides?.[modelName]?.baseUrl;
-  return { baseUrl: ovBase ?? p.baseUrl };
+  const ov = modelName ? p.modelOverrides?.[modelName] : undefined;
+  return {
+    baseUrl: ov?.baseUrl ?? p.baseUrl,
+    authToken: ov?.authToken ?? p.authToken,
+  };
 }
 
 /**
@@ -89,10 +92,12 @@ function buildResumeCommand(s) {
   if (s.provider) lines.push(`# provider: ${s.provider}`);
   if (s.model) lines.push(`# model:    ${s.model}`);
 
-  const { baseUrl } = resolveSessionEndpoint(selected, s.provider, s.model);
+  const { baseUrl, authToken } = resolveSessionEndpoint(selected, s.provider, s.model);
   if (baseUrl) {
     lines.push(`export ANTHROPIC_BASE_URL=${JSON.stringify(baseUrl)}`);
-    lines.push(`export ANTHROPIC_AUTH_TOKEN="<your-token>"`);
+    lines.push(
+      `export ANTHROPIC_AUTH_TOKEN=${JSON.stringify(authToken ?? "<your-token>")}`,
+    );
     if (s.model) {
       lines.push(`export ANTHROPIC_DEFAULT_HAIKU_MODEL=${JSON.stringify(s.model)}`);
       lines.push(`export ANTHROPIC_DEFAULT_SONNET_MODEL=${JSON.stringify(s.model)}`);

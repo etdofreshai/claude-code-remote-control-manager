@@ -43,6 +43,10 @@ pre { white-space: pre-wrap; word-break: break-word; background: #0a0b0e; border
 .card { background: #15171c; padding: 24px; border-radius: 8px; border: 1px solid #23262d; width: 320px; }
 
 .session-meta { display: block; min-width: 0; word-break: break-all; }
+.session-disabled { opacity: 0.55; }
+.session-disabled .session-meta strong { text-decoration: line-through; }
+.btn-primary { background: #2b6cb0; border-color: #2b6cb0; color: #fff; }
+.btn-primary:hover { background: #3182ce; }
 .session-meta .copyable { cursor: pointer; user-select: none; transition: color 0.15s ease, background 0.15s ease; padding: 1px 3px; border-radius: 3px; }
 .session-meta .copyable:hover { color: #5dadec; background: rgba(93, 173, 236, 0.08); }
 .session-meta .copyable.copied-flash { color: #4ade80; background: rgba(74, 222, 128, 0.12); }

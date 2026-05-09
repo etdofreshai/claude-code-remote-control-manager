@@ -115,7 +115,14 @@ loadAgents();
 
 interface AgentCommand {
   id: string;
-  type: "new" | "bind" | "remove" | "rename" | "list" | "refresh";
+  type:
+    | "new"
+    | "bind"
+    | "remove"
+    | "rename"
+    | "list"
+    | "refresh"
+    | "setEnabled";
   payload: {
     workingDirectory?: string;
     sessionId?: string;
@@ -123,6 +130,7 @@ interface AgentCommand {
     provider?: string;
     model?: string;
     effort?: string;
+    enabled?: boolean;
     page?: number;
     pageSize?: number;
     query?: string;
@@ -417,6 +425,28 @@ app.post("/api/clients/:name/sessions/:sessionId/rename", async (req) => {
       name: newName?.trim() || undefined,
       workingDirectory,
     },
+  };
+  return enqueue(name, cmd);
+});
+
+app.post("/api/clients/:name/sessions/:sessionId/enabled", async (req) => {
+  const { name, sessionId } = req.params as { name: string; sessionId: string };
+  const agent = agents.get(name);
+  if (!agent) throw new Error(`unknown client: ${name}`);
+  const { enabled } = (req.body ?? {}) as { enabled?: boolean };
+  if (typeof enabled !== "boolean") throw new Error("enabled (boolean) required");
+  // Optimistically reflect in server cache so the UI updates immediately.
+  agent.sessions = agent.sessions.map((s) =>
+    s.sessionId === sessionId
+      ? { ...s, enabled, status: enabled ? "starting" : "disabled" }
+      : s,
+  );
+  agents.set(name, agent);
+  saveAgents();
+  const cmd: AgentCommand = {
+    id: randomUUID(),
+    type: "setEnabled",
+    payload: { sessionId, enabled },
   };
   return enqueue(name, cmd);
 });

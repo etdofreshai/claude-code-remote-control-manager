@@ -557,6 +557,42 @@ export async function renameTracked(
  * doesn't see those new messages until it re-reads the on-disk transcript.
  * Killing + respawning forces a fresh load.
  */
+/**
+ * Enable or disable a tracked session.
+ *  - disable: kill the running query but keep the entry in the list.
+ *  - enable:  spawn (resume) the session.
+ */
+export async function setSessionEnabled(
+  sessionId: string,
+  enabled: boolean,
+): Promise<{ enabled: boolean; status: string }> {
+  if (!isUuid(sessionId)) throw new Error(`invalid session id: ${sessionId}`);
+  const list = load();
+  const entry = list.find((s) => s.sessionId === sessionId);
+  if (!entry) throw new Error(`session ${sessionId} not tracked`);
+
+  if (!enabled) {
+    await killSession(sessionId);
+    patch(sessionId, { enabled: false, status: "disabled" });
+    return { enabled: false, status: "disabled" };
+  }
+
+  patch(sessionId, { enabled: true, status: "starting" });
+  startQuery({
+    sessionId,
+    workingDirectory: entry.workingDirectory,
+    resume: true,
+    name: entry.name,
+    provider: entry.provider ?? DEFAULT_PROVIDER,
+    model: entry.model,
+    effort: (entry.effort ?? DEFAULT_EFFORT) as Effort,
+    pushBootstrap: false,
+  }).catch((err) =>
+    console.error(`setSessionEnabled ${sessionId}: spawn failed`, err),
+  );
+  return { enabled: true, status: "starting" };
+}
+
 export async function refreshSession(
   sessionId: string,
 ): Promise<{ refreshed: boolean }> {
@@ -597,6 +633,10 @@ export async function resumeAllTracked(): Promise<void> {
   }
   for (const entry of valid) {
     if (running.has(entry.sessionId)) continue;
+    if (entry.enabled === false) {
+      console.log(`skipping disabled session ${entry.sessionId}`);
+      continue;
+    }
     try {
       startQuery({
         sessionId: entry.sessionId,

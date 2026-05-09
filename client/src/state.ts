@@ -11,9 +11,11 @@ export interface TrackedSession {
   provider?: string;
   model?: string;
   effort?: Effort;
+  /** false = tracked but not currently running; default true. */
+  enabled?: boolean;
   addedAt: string;
   lastMessageAt?: string;
-  status?: "starting" | "running" | "errored" | "stopped";
+  status?: "starting" | "running" | "errored" | "stopped" | "disabled";
 }
 
 const STATE_DIR =

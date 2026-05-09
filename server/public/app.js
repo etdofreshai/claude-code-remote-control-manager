@@ -256,6 +256,32 @@ function renderSessions(c) {
     const btns = document.createElement("div");
     btns.className = "btn-stack";
 
+    const isDisabled = s.enabled === false;
+    if (isDisabled) li.classList.add("session-disabled");
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.textContent = isDisabled ? "Enable" : "Disable";
+    toggleBtn.className = isDisabled ? "btn-primary" : "btn-secondary";
+    toggleBtn.title = isDisabled
+      ? "Resume this session and re-attach remote control"
+      : "Stop the running query but keep the entry in the list";
+    toggleBtn.onclick = async (e) => {
+      e.stopPropagation();
+      toggleBtn.disabled = true;
+      try {
+        const r = await api(
+          `/api/clients/${encodeURIComponent(selected)}/sessions/${encodeURIComponent(s.sessionId)}/enabled`,
+          { method: "POST", body: JSON.stringify({ enabled: isDisabled }) },
+        );
+        showResult(JSON.stringify(r, null, 2));
+        loadClients();
+      } catch (err) {
+        showResult(String(err));
+      } finally {
+        toggleBtn.disabled = false;
+      }
+    };
+
     const refreshBtn = document.createElement("button");
     refreshBtn.textContent = "Refresh";
     refreshBtn.className = "btn-secondary";
@@ -334,9 +360,16 @@ function renderSessions(c) {
       }
     };
 
+    btns.appendChild(toggleBtn);
     btns.appendChild(refreshBtn);
     btns.appendChild(copyResumeBtn);
     btns.appendChild(renameBtn);
+    // pad to a 6-cell 2-col grid so Remove always lands bottom-right
+    if (btns.children.length === 5) {
+      const filler = document.createElement("span");
+      filler.style.visibility = "hidden";
+      btns.appendChild(filler);
+    }
     btns.appendChild(removeBtn);
     li.appendChild(btns);
     ul.appendChild(li);

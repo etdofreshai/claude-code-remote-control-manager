@@ -55,6 +55,7 @@ pre { white-space: pre-wrap; word-break: break-word; background: #0a0b0e; border
 .group-heading { background: #0e0f12; border: none !important; color: #9aa0aa; padding: 6px 4px !important; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; cursor: default; }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: grid; place-items: center; z-index: 100; }
+.modal.hidden { display: none; }
 .modal-card { background: #15171c; border: 1px solid #2c303a; border-radius: 10px; padding: 18px 18px 14px; min-width: 320px; max-width: 420px; }
 .modal-card h3 { margin: 0 0 6px; }
 .modal-current { font-size: 12px; color: #9aa0aa; margin: 0 0 12px; }

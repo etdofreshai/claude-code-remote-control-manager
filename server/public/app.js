@@ -75,7 +75,6 @@ function buildResumeCommand(s) {
   const args = ["claude", "--resume", s.sessionId];
   if (s.workingDirectory) args.push("--add-dir", JSON.stringify(s.workingDirectory));
   if (s.effort) args.push("--effort", s.effort);
-  if (s.model) args.push("--model", s.model);
   args.push("--remote-control");
   const cmd = args.join(" ");
   // Provider hints (user can mirror into shell env if needed).

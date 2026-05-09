@@ -21,6 +21,11 @@ const AGENT_OFFLINE_AFTER_MS = 60_000;
 interface TrackedSession {
   sessionId: string;
   workingDirectory: string;
+  name?: string;
+  provider?: string;
+  model?: string;
+  effort?: string;
+  enabled?: boolean;
   addedAt: string;
   lastMessageAt?: string;
   status?: string;

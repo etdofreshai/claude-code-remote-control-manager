@@ -6,6 +6,7 @@ import {
   renameTracked,
   renameAny,
   refreshSession,
+  switchSession,
   setSessionEnabled,
   listTracked,
   resumeAllTracked,
@@ -72,7 +73,15 @@ async function pollOnce(): Promise<void> {
   if (!res.ok) throw new Error(`poll ${res.status}`);
   const cmd = (await res.json()) as {
     id: string;
-    type: "new" | "bind" | "remove" | "rename" | "list" | "refresh" | "setEnabled";
+    type:
+      | "new"
+      | "bind"
+      | "remove"
+      | "rename"
+      | "list"
+      | "refresh"
+      | "setEnabled"
+      | "switch";
     payload: {
       workingDirectory?: string;
       sessionId?: string;
@@ -128,6 +137,13 @@ async function pollOnce(): Promise<void> {
       if (typeof cmd.payload.enabled !== "boolean")
         throw new Error("enabled (boolean) required for setEnabled");
       result = await setSessionEnabled(cmd.payload.sessionId, cmd.payload.enabled);
+    } else if (cmd.type === "switch") {
+      if (!cmd.payload.sessionId) throw new Error("sessionId required for switch");
+      result = await switchSession(cmd.payload.sessionId, {
+        provider: cmd.payload.provider,
+        model: cmd.payload.model,
+        effort: cmd.payload.effort,
+      });
     } else if (cmd.type === "list") {
       if (!cmd.payload.workingDirectory)
         throw new Error("workingDirectory required for list");

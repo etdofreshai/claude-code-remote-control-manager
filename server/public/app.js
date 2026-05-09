@@ -4,6 +4,35 @@ let selected = null;
 let lastFillKey = null;
 let lastClients = [];
 
+// TODO(future): drop the "provider" concept from the UI entirely and
+// expose a single flat model picker — opus / sonnet / haiku / glm /
+// codex (and whatever else lands later). The provider→model nesting
+// is plumbing that doesn't pay for itself in the UI; callers just want
+// to pick a model and go. When we do this, the spawn payload still
+// passes a model name, and resolveEndpoint() infers the provider from
+// the model identifier.
+
+function loadPref(key, fallback) {
+  try {
+    const v = localStorage.getItem(`ccrcm_${key}`);
+    return v ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function savePref(key, val) {
+  try {
+    if (val) localStorage.setItem(`ccrcm_${key}`, val);
+    else localStorage.removeItem(`ccrcm_${key}`);
+  } catch {
+    /* ignore */
+  }
+}
+
+let sortPrimary = loadPref("sortPrimary", "lastMessage");
+let sortSecondary = loadPref("sortSecondary", "");
+let groupBy = loadPref("groupBy", "");
+
 function getToken() {
   return localStorage.getItem("ccrcm_token");
 }
@@ -195,14 +224,77 @@ function renderSessions(c) {
   }
   const ul = $("#sessions");
   ul.innerHTML = "";
-  const sessions = (c?.sessions ?? [])
-    .slice()
-    .sort((a, b) => (b.lastMessageAt ?? b.addedAt).localeCompare(a.lastMessageAt ?? a.addedAt));
+  const sessions = (c?.sessions ?? []).slice();
   if (!sessions.length) {
     ul.innerHTML = "<li class=empty>No remote sessions yet.</li>";
     return;
   }
-  for (const s of sessions) {
+  applySort(sessions, sortPrimary, sortSecondary);
+  const groups = groupBy ? groupSessions(sessions, groupBy) : [{ key: "", items: sessions }];
+  for (const g of groups) {
+    if (g.key) {
+      const heading = document.createElement("li");
+      heading.className = "group-heading";
+      heading.textContent = g.label ?? g.key;
+      ul.appendChild(heading);
+    }
+    for (const s of g.items) {
+      renderSessionRow(ul, s);
+    }
+  }
+}
+
+const SORT_KEYS = {
+  lastMessage: (s) => s.lastMessageAt ?? s.addedAt ?? "",
+  name: (s) => (s.name ?? "").toLowerCase(),
+  enabled: (s) => (s.enabled === false ? 1 : 0), // enabled (0) sorts first
+  model: (s) => (s.model ?? "").toLowerCase(),
+  provider: (s) => (s.provider ?? "").toLowerCase(),
+};
+function cmpFor(key) {
+  const fn = SORT_KEYS[key];
+  if (!fn) return () => 0;
+  // For lastMessage we want descending; everything else ascending.
+  const dir = key === "lastMessage" ? -1 : 1;
+  return (a, b) => {
+    const av = fn(a);
+    const bv = fn(b);
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return 0;
+  };
+}
+function applySort(arr, primary, secondary) {
+  const a = cmpFor(primary);
+  const b = secondary ? cmpFor(secondary) : null;
+  arr.sort((x, y) => a(x, y) || (b ? b(x, y) : 0));
+}
+function groupSessions(arr, key) {
+  const map = new Map();
+  for (const s of arr) {
+    let k;
+    let label;
+    if (key === "enabled") {
+      k = s.enabled === false ? "disabled" : "enabled";
+      label = k === "enabled" ? "● Enabled" : "○ Disabled";
+    } else if (key === "model") {
+      k = s.model ?? "(no model)";
+      label = `Model: ${k}`;
+    } else if (key === "provider") {
+      k = s.provider ?? "(no provider)";
+      label = `Provider: ${k}`;
+    } else {
+      k = "";
+      label = "";
+    }
+    if (!map.has(k)) map.set(k, { key: k, label, items: [] });
+    map.get(k).items.push(s);
+  }
+  return [...map.values()];
+}
+
+function renderSessionRow(ul, s) {
+  for (const _unused of [0]) {
     const li = document.createElement("li");
 
     const left = document.createElement("span");
@@ -360,16 +452,20 @@ function renderSessions(c) {
       }
     };
 
+    const switchBtn = document.createElement("button");
+    switchBtn.textContent = "Switch";
+    switchBtn.className = "btn-secondary";
+    switchBtn.title = "Change provider/model/effort and respawn this session";
+    switchBtn.onclick = (e) => {
+      e.stopPropagation();
+      openSwitchModal(s);
+    };
+
     btns.appendChild(toggleBtn);
+    btns.appendChild(switchBtn);
     btns.appendChild(refreshBtn);
     btns.appendChild(copyResumeBtn);
     btns.appendChild(renameBtn);
-    // pad to a 6-cell 2-col grid so Remove always lands bottom-right
-    if (btns.children.length === 5) {
-      const filler = document.createElement("span");
-      filler.style.visibility = "hidden";
-      btns.appendChild(filler);
-    }
     btns.appendChild(removeBtn);
     li.appendChild(btns);
     ul.appendChild(li);
@@ -611,6 +707,100 @@ $("#browse-next").addEventListener("click", () => {
   browsePage++;
   loadBrowsePage();
 });
+// ─── Sort/group controls ───────────────────────────────────────────
+function initSortControls() {
+  const p = $("#sort-primary");
+  const s = $("#sort-secondary");
+  const g = $("#group-by");
+  if (!p) return;
+  p.value = sortPrimary;
+  s.value = sortSecondary;
+  g.value = groupBy;
+  p.onchange = () => {
+    sortPrimary = p.value;
+    savePref("sortPrimary", sortPrimary);
+    rerender();
+  };
+  s.onchange = () => {
+    sortSecondary = s.value;
+    savePref("sortSecondary", sortSecondary);
+    rerender();
+  };
+  g.onchange = () => {
+    groupBy = g.value;
+    savePref("groupBy", groupBy);
+    rerender();
+  };
+}
+function rerender() {
+  const c = lastClients.find((x) => x.name === selected);
+  if (c) renderSessions(c);
+}
+initSortControls();
+
+// ─── Switch modal ───────────────────────────────────────────────────
+let switchTarget = null;
+function openSwitchModal(s) {
+  switchTarget = s;
+  const c = lastClients.find((x) => x.name === selected);
+  const providers = c?.providers ?? { claude: { models: [] } };
+  const providerNames = Object.keys(providers);
+
+  const provSel = $("#switch-form select[name='provider']");
+  const modelSel = $("#switch-form select[name='model']");
+  const effortSel = $("#switch-form select[name='effort']");
+
+  provSel.innerHTML = providerNames.map((n) => `<option value="${n}">${n}</option>`).join("");
+  effortSel.innerHTML = EFFORTS.map((e) => `<option value="${e}">${e}</option>`).join("");
+
+  const refreshModels = () => {
+    const p = providers[provSel.value] ?? { models: [] };
+    modelSel.innerHTML =
+      `<option value="">(provider default)</option>` +
+      (p.models ?? []).map((m) => `<option value="${m}">${m}</option>`).join("");
+    if (s.provider === provSel.value && s.model) modelSel.value = s.model;
+  };
+  provSel.onchange = refreshModels;
+
+  provSel.value = providerNames.includes(s.provider) ? s.provider : providerNames[0];
+  refreshModels();
+  effortSel.value = EFFORTS.includes(s.effort) ? s.effort : "low";
+
+  $("#switch-current").textContent =
+    `Currently: ${s.provider ?? "?"}/${s.model ?? "?"} · effort ${s.effort ?? "?"}`;
+  $("#switch-modal").classList.remove("hidden");
+}
+function closeSwitchModal() {
+  $("#switch-modal").classList.add("hidden");
+  switchTarget = null;
+}
+$("#switch-cancel").addEventListener("click", closeSwitchModal);
+$("#switch-modal").addEventListener("click", (e) => {
+  if (e.target.id === "switch-modal") closeSwitchModal();
+});
+$("#switch-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!switchTarget) return;
+  const fd = Object.fromEntries(new FormData(e.target));
+  const body = {
+    provider: fd.provider || undefined,
+    model: fd.model || "",
+    effort: fd.effort || undefined,
+  };
+  showResult("…switching");
+  try {
+    const r = await api(
+      `/api/clients/${encodeURIComponent(selected)}/sessions/${encodeURIComponent(switchTarget.sessionId)}/switch`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    showResult(JSON.stringify(r, null, 2));
+    closeSwitchModal();
+    loadClients();
+  } catch (err) {
+    showResult(String(err));
+  }
+});
+
 $("#logout").addEventListener("click", async () => {
   try {
     await api("/api/logout", { method: "POST" });

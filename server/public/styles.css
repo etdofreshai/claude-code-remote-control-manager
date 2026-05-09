@@ -47,6 +47,19 @@ pre { white-space: pre-wrap; word-break: break-word; background: #0a0b0e; border
 .session-disabled .session-meta strong { text-decoration: line-through; }
 .btn-primary { background: #2b6cb0; border-color: #2b6cb0; color: #fff; }
 .btn-primary:hover { background: #3182ce; }
+
+.session-controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; padding: 8px 0 12px; border-top: 1px solid #23262d; margin-top: 8px; }
+.session-controls label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: #9aa0aa; text-transform: uppercase; letter-spacing: 0.04em; }
+.session-controls select { padding: 6px 8px; min-width: 140px; }
+
+.group-heading { background: #0e0f12; border: none !important; color: #9aa0aa; padding: 6px 4px !important; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; cursor: default; }
+
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: grid; place-items: center; z-index: 100; }
+.modal-card { background: #15171c; border: 1px solid #2c303a; border-radius: 10px; padding: 18px 18px 14px; min-width: 320px; max-width: 420px; }
+.modal-card h3 { margin: 0 0 6px; }
+.modal-current { font-size: 12px; color: #9aa0aa; margin: 0 0 12px; }
+.modal-card form label { display: block; font-size: 11px; color: #9aa0aa; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
+.modal-card form select { margin-top: 4px; }
 .session-meta .copyable { cursor: pointer; user-select: none; transition: color 0.15s ease, background 0.15s ease; padding: 1px 3px; border-radius: 3px; }
 .session-meta .copyable:hover { color: #5dadec; background: rgba(93, 173, 236, 0.08); }
 .session-meta .copyable.copied-flash { color: #4ade80; background: rgba(74, 222, 128, 0.12); }

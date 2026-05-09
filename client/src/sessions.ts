@@ -194,6 +194,10 @@ async function startQuery(opts: {
   model?: string;
   effort: Effort;
   pushBootstrap: boolean;
+  /** Override the synthetic prefatory message text. If set, this is
+   *  pushed as a synthetic user message even on resume — useful for
+   *  in-band notices like model-switch announcements. */
+  noticeText?: string;
 }): Promise<RunningSession> {
   const { stream, push, close } = createMessageStream();
   const abort = new AbortController();
@@ -202,7 +206,15 @@ async function startQuery(opts: {
   // fire its init event before we can call enableRemoteControl(). Resumed
   // sessions (bind + reboot-time restore) init from existing transcript
   // state, so no synthetic message is needed.
-  if (!opts.resume && opts.pushBootstrap) {
+  if (opts.noticeText) {
+    push({
+      type: "user",
+      message: { role: "user", content: opts.noticeText },
+      parent_tool_use_id: null,
+      isSynthetic: true,
+      timestamp: new Date().toISOString(),
+    });
+  } else if (!opts.resume && opts.pushBootstrap) {
     push(bootstrapMessage({ provider: opts.provider, model: opts.model, effort: opts.effort }));
   }
 
@@ -557,6 +569,60 @@ export async function renameTracked(
  * doesn't see those new messages until it re-reads the on-disk transcript.
  * Killing + respawning forces a fresh load.
  */
+/**
+ * Switch a session's provider/model/effort. Kills the running query and
+ * respawns it with the new env mapping. Useful for tier-shifting a
+ * conversation without losing its transcript.
+ */
+export async function switchSession(
+  sessionId: string,
+  next: { provider?: string; model?: string; effort?: Effort },
+): Promise<TrackedSession> {
+  if (!isUuid(sessionId)) throw new Error(`invalid session id: ${sessionId}`);
+  const list = load();
+  const entry = list.find((s) => s.sessionId === sessionId);
+  if (!entry) throw new Error(`session ${sessionId} not tracked`);
+
+  const provider = next.provider?.trim() || entry.provider || DEFAULT_PROVIDER;
+  const model = next.model?.trim() || entry.model;
+  const effort = (next.effort ?? entry.effort ?? DEFAULT_EFFORT) as Effort;
+
+  // Build a notice if anything actually changed.
+  const before = `${entry.provider ?? "?"}/${entry.model ?? "?"} (effort: ${entry.effort ?? "?"})`;
+  const after = `${provider}/${model ?? "?"} (effort: ${effort})`;
+  const changed =
+    entry.provider !== provider ||
+    entry.model !== model ||
+    entry.effort !== effort;
+  const noticeText = changed
+    ? `Model/effort switched: ${before} → ${after}. No reply needed.`
+    : undefined;
+
+  await killSession(sessionId);
+  await new Promise((r) => setTimeout(r, 250));
+
+  patch(sessionId, { provider, model, effort, status: "starting" });
+
+  if (entry.enabled === false) {
+    // Switch is allowed on disabled sessions but we don't auto-respawn.
+    return { ...entry, provider, model, effort };
+  }
+
+  startQuery({
+    sessionId,
+    workingDirectory: entry.workingDirectory,
+    resume: true,
+    name: entry.name,
+    provider,
+    model,
+    effort,
+    pushBootstrap: false,
+    noticeText,
+  }).catch((err) => console.error(`switchSession ${sessionId}: spawn failed`, err));
+
+  return { ...entry, provider, model, effort };
+}
+
 /**
  * Enable or disable a tracked session.
  *  - disable: kill the running query but keep the entry in the list.

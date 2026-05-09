@@ -71,7 +71,60 @@
         </div>
       </form>
 
+      <div class="session-controls">
+        <label>Sort
+          <select id="sort-primary">
+            <option value="lastMessage">Last message</option>
+            <option value="name">Name (a–z)</option>
+            <option value="enabled">Enabled first</option>
+            <option value="model">Model</option>
+            <option value="provider">Provider</option>
+          </select>
+        </label>
+        <label>Then
+          <select id="sort-secondary">
+            <option value="">—</option>
+            <option value="lastMessage">Last message</option>
+            <option value="name">Name (a–z)</option>
+            <option value="enabled">Enabled first</option>
+            <option value="model">Model</option>
+            <option value="provider">Provider</option>
+          </select>
+        </label>
+        <label>Group by
+          <select id="group-by">
+            <option value="">—</option>
+            <option value="model">Model</option>
+            <option value="provider">Provider</option>
+            <option value="enabled">Enabled / Disabled</option>
+          </select>
+        </label>
+      </div>
+
       <ul id="sessions"></ul>
+
+      <!-- Switch modal -->
+      <div id="switch-modal" class="modal hidden" role="dialog" aria-modal="true">
+        <div class="modal-card">
+          <h3>Switch session</h3>
+          <p id="switch-current" class="modal-current"></p>
+          <form id="switch-form">
+            <label>Provider
+              <select name="provider"></select>
+            </label>
+            <label>Model
+              <select name="model"></select>
+            </label>
+            <label>Effort
+              <select name="effort"></select>
+            </label>
+            <div class="row">
+              <button>Switch</button>
+              <button type="button" id="switch-cancel" class="btn-secondary">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
 
       <pre id="result" class="hidden">—</pre>
     </section>

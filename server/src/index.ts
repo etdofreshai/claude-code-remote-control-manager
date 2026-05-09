@@ -122,7 +122,8 @@ interface AgentCommand {
     | "rename"
     | "list"
     | "refresh"
-    | "setEnabled";
+    | "setEnabled"
+    | "switch";
   payload: {
     workingDirectory?: string;
     sessionId?: string;
@@ -425,6 +426,37 @@ app.post("/api/clients/:name/sessions/:sessionId/rename", async (req) => {
       name: newName?.trim() || undefined,
       workingDirectory,
     },
+  };
+  return enqueue(name, cmd);
+});
+
+app.post("/api/clients/:name/sessions/:sessionId/switch", async (req) => {
+  const { name, sessionId } = req.params as { name: string; sessionId: string };
+  const agent = agents.get(name);
+  if (!agent) throw new Error(`unknown client: ${name}`);
+  const { provider, model, effort } = (req.body ?? {}) as {
+    provider?: string;
+    model?: string;
+    effort?: string;
+  };
+  // Optimistically reflect in server cache.
+  agent.sessions = agent.sessions.map((s) =>
+    s.sessionId === sessionId
+      ? {
+          ...s,
+          provider: provider ?? s.provider,
+          model: model !== undefined ? model || undefined : s.model,
+          effort: (effort as any) ?? s.effort,
+          status: "starting",
+        }
+      : s,
+  );
+  agents.set(name, agent);
+  saveAgents();
+  const cmd: AgentCommand = {
+    id: randomUUID(),
+    type: "switch",
+    payload: { sessionId, provider, model, effort },
   };
   return enqueue(name, cmd);
 });

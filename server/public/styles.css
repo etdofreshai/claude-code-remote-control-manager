@@ -26,8 +26,8 @@ li code { background: #0a0b0e; padding: 1px 4px; border-radius: 3px; }
 .btn-danger { background: transparent; border-color: #c53030; color: #fc8181; width: auto; padding: 4px 10px; margin-left: 8px; }
 .btn-danger:hover { background: #2a1212; }
 .btn-inline { width: auto; padding: 4px 10px; }
-.btn-stack { display: flex; flex-direction: column; gap: 4px; }
-.btn-stack button { width: auto; padding: 4px 10px; }
+.btn-stack { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.btn-stack button { width: auto; padding: 4px 10px; white-space: nowrap; }
 .input-with-action { display: flex; gap: 6px; margin-bottom: 6px; }
 .input-with-action input { margin-bottom: 0; }
 .session-browser { background: #0a0b0e; border: 1px solid #2c303a; border-radius: 6px; padding: 8px; margin-bottom: 8px; }

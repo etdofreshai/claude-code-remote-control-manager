@@ -16,10 +16,18 @@ RUN apt-get update \
         jq ripgrep file patch unzip zip tar xz-utils tree bc procps less dnsutils \
         # tier 2 — build toolchain (so pip/cargo native compiles work)
         build-essential cmake ninja-build pkg-config libssl-dev zlib1g-dev \
+        # clang/llvm
+        clang lld \
         # tier 3 — python
         python3 python3-pip python3-venv pipx \
         # media
         ffmpeg imagemagick \
+        # SDL3 build deps (audio, x11, wayland, drm/gl, dbus, udev)
+        libasound2-dev libpulse-dev \
+        libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev libxkbcommon-dev \
+        libwayland-dev wayland-protocols \
+        libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev \
+        libdbus-1-dev libudev-dev \
     # gh (GitHub CLI) via official apt repo
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -35,6 +43,25 @@ RUN apt-get update \
     # passwordless sudo for the `node` user so agent commands can apt/install
     && echo "node ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/node \
     && chmod 0440 /etc/sudoers.d/node
+
+# SDL3 from source. Debian bookworm only ships SDL2; SDL3 is tagged
+# upstream. Bumping the version: change SDL_VERSION below.
+ARG SDL_VERSION=3.2.20
+RUN set -eux \
+    && cd /tmp \
+    && curl -fsSL "https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL3-${SDL_VERSION}.tar.gz" \
+        -o sdl3.tar.gz \
+    && tar xzf sdl3.tar.gz \
+    && cmake -S "SDL3-${SDL_VERSION}" -B SDL3-build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DSDL_SHARED=ON -DSDL_STATIC=ON \
+        -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF \
+    && cmake --build SDL3-build --parallel \
+    && cmake --install SDL3-build \
+    && ldconfig \
+    && rm -rf /tmp/sdl3.tar.gz /tmp/SDL3-${SDL_VERSION} /tmp/SDL3-build \
+    && pkg-config --modversion sdl3
 
 RUN set -eux \
     && CC_VERSION=$(curl -fsSL https://downloads.claude.ai/claude-code-releases/latest) \

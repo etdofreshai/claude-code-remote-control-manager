@@ -103,6 +103,28 @@
 
       <ul id="sessions"></ul>
 
+      <!-- Send-message modal -->
+      <div id="send-modal" class="modal hidden" role="dialog" aria-modal="true">
+        <div class="modal-card">
+          <h3>Send message</h3>
+          <p id="send-target" class="modal-current"></p>
+          <form id="send-form">
+            <label>Text
+              <textarea name="text" rows="6" placeholder="Steer the session…" required></textarea>
+            </label>
+            <details>
+              <summary>Attach image (optional)</summary>
+              <input type="file" name="image" accept="image/*">
+              <p class="modal-current">PNG/JPEG/WebP. Sent as a base64 image block alongside the text.</p>
+            </details>
+            <div class="row">
+              <button>Send</button>
+              <button type="button" id="send-cancel" class="btn-secondary">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <!-- Switch modal -->
       <div id="switch-modal" class="modal hidden" role="dialog" aria-modal="true">
         <div class="modal-card">

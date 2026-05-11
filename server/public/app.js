@@ -461,11 +461,25 @@ function renderSessionRow(ul, s) {
       openSwitchModal(s);
     };
 
+    const sendBtn = document.createElement("button");
+    sendBtn.textContent = "Send";
+    sendBtn.className = "btn-primary";
+    sendBtn.title = "Inject a user message into this session";
+    sendBtn.onclick = (e) => {
+      e.stopPropagation();
+      openSendModal(s);
+    };
+
+    // 7 buttons → 2-col grid with one filler so Remove sits bottom-right.
+    btns.appendChild(sendBtn);
     btns.appendChild(toggleBtn);
     btns.appendChild(switchBtn);
     btns.appendChild(refreshBtn);
     btns.appendChild(copyResumeBtn);
     btns.appendChild(renameBtn);
+    const filler = document.createElement("span");
+    filler.style.visibility = "hidden";
+    btns.appendChild(filler);
     btns.appendChild(removeBtn);
     li.appendChild(btns);
     ul.appendChild(li);
@@ -737,6 +751,75 @@ function rerender() {
   if (c) renderSessions(c);
 }
 initSortControls();
+
+// ─── Send-message modal ─────────────────────────────────────────────
+let sendTarget = null;
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const result = String(fr.result || "");
+      // strip data:image/png;base64, prefix
+      const idx = result.indexOf(",");
+      resolve(idx >= 0 ? result.slice(idx + 1) : result);
+    };
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(file);
+  });
+}
+
+function openSendModal(s) {
+  sendTarget = s;
+  $("#send-form textarea[name='text']").value = "";
+  const fileInput = $("#send-form input[name='image']");
+  if (fileInput) fileInput.value = "";
+  $("#send-target").textContent =
+    `To: ${s.name ?? "(unnamed)"} · ${s.sessionId}`;
+  $("#send-modal").classList.remove("hidden");
+  setTimeout(() => $("#send-form textarea[name='text']").focus(), 50);
+}
+function closeSendModal() {
+  $("#send-modal").classList.add("hidden");
+  sendTarget = null;
+}
+$("#send-cancel").addEventListener("click", closeSendModal);
+$("#send-modal").addEventListener("click", (e) => {
+  if (e.target.id === "send-modal") closeSendModal();
+});
+$("#send-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!sendTarget) return;
+  const text = $("#send-form textarea[name='text']").value;
+  const file = $("#send-form input[name='image']")?.files?.[0];
+
+  let body;
+  if (file) {
+    const b64 = await readFileAsBase64(file);
+    const blocks = [];
+    if (text.trim()) blocks.push({ type: "text", text });
+    blocks.push({
+      type: "image",
+      source: { type: "base64", media_type: file.type || "image/png", data: b64 },
+    });
+    body = { content: blocks };
+  } else {
+    body = { text };
+  }
+
+  showResult("…sending");
+  try {
+    const r = await api(
+      `/api/clients/${encodeURIComponent(selected)}/sessions/${encodeURIComponent(sendTarget.sessionId)}/message`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+    showResult(JSON.stringify(r, null, 2));
+    closeSendModal();
+    loadClients();
+  } catch (err) {
+    showResult(String(err));
+  }
+});
 
 // ─── Switch modal ───────────────────────────────────────────────────
 let switchTarget = null;

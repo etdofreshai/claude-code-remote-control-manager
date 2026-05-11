@@ -61,6 +61,10 @@ pre { white-space: pre-wrap; word-break: break-word; background: #0a0b0e; border
 .modal-current { font-size: 12px; color: #9aa0aa; margin: 0 0 12px; }
 .modal-card form label { display: block; font-size: 11px; color: #9aa0aa; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
 .modal-card form select { margin-top: 4px; }
+.modal-card form textarea { width: 100%; padding: 8px; background: #0e0f12; color: #e7e9ee; border: 1px solid #2c303a; border-radius: 6px; font: inherit; resize: vertical; min-height: 100px; margin-top: 4px; }
+.modal-card details { margin: 8px 0 12px; font-size: 12px; color: #9aa0aa; }
+.modal-card details summary { cursor: pointer; padding: 4px 0; }
+.modal-card details input[type="file"] { margin-top: 6px; color: #e7e9ee; }
 .session-meta .copyable { cursor: pointer; user-select: none; transition: color 0.15s ease, background 0.15s ease; padding: 1px 3px; border-radius: 3px; }
 .session-meta .copyable:hover { color: #5dadec; background: rgba(93, 173, 236, 0.08); }
 .session-meta .copyable.copied-flash { color: #4ade80; background: rgba(74, 222, 128, 0.12); }

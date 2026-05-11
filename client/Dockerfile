@@ -38,8 +38,8 @@ RUN apt-get update \
     && apt-get update \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/* \
-    # OpenAI Codex CLI (npm global)
-    && npm install -g @openai/codex \
+    # OpenAI Codex CLI + Google Gemini CLI (npm globals)
+    && npm install -g @openai/codex @google/gemini-cli \
     # passwordless sudo for the `node` user so agent commands can apt/install
     && echo "node ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/node \
     && chmod 0440 /etc/sudoers.d/node

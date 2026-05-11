@@ -10,6 +10,10 @@ import { randomUUID } from "node:crypto";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const UI_PASSWORD = process.env.UI_PASSWORD ?? "changeme";
+const API_TOKENS = (process.env.API_TOKENS ?? "")
+  .split(/[,\s]+/)
+  .map((s) => s.trim())
+  .filter(Boolean);
 const CLIENT_TOKEN = process.env.CLIENT_TOKEN ?? "shared-token";
 const PORT = Number(process.env.PORT ?? 3000);
 const SESSION_COOKIE = "ccrcm_session";
@@ -128,7 +132,8 @@ interface AgentCommand {
     | "list"
     | "refresh"
     | "setEnabled"
-    | "switch";
+    | "switch"
+    | "message";
   payload: {
     workingDirectory?: string;
     sessionId?: string;
@@ -137,6 +142,7 @@ interface AgentCommand {
     model?: string;
     effort?: string;
     enabled?: boolean;
+    content?: unknown;
     page?: number;
     pageSize?: number;
     query?: string;
@@ -226,7 +232,10 @@ const INDEX_HTML = readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
 const isAuthed = (req: any) => {
   if (req.cookies?.[SESSION_COOKIE] === SESSION_VALUE) return true;
   const auth = req.headers?.authorization;
-  if (typeof auth === "string" && auth === `Bearer ${SESSION_VALUE}`) return true;
+  if (typeof auth !== "string" || !auth.startsWith("Bearer ")) return false;
+  const tok = auth.slice("Bearer ".length);
+  if (tok === SESSION_VALUE) return true;
+  if (API_TOKENS.includes(tok)) return true;
   return false;
 };
 const isAgentReq = (req: any) => req.headers.authorization === `Bearer ${CLIENT_TOKEN}`;
@@ -431,6 +440,42 @@ app.post("/api/clients/:name/sessions/:sessionId/rename", async (req) => {
       name: newName?.trim() || undefined,
       workingDirectory,
     },
+  };
+  return enqueue(name, cmd);
+});
+
+/**
+ * Steer/continue a running session by injecting an external user message.
+ * Body:
+ *   { "text": "string" }
+ *   or
+ *   { "content": [ {type:"text", text:"..."},
+ *                  {type:"image", source:{type:"base64",media_type:"image/png",data:"<b64>"}} ] }
+ *
+ * Auth: cookie or Bearer SESSION_VALUE OR a token from the API_TOKENS env
+ * (comma/space-separated). External integrations should use API_TOKENS.
+ */
+app.post("/api/clients/:name/sessions/:sessionId/message", async (req) => {
+  const { name, sessionId } = req.params as { name: string; sessionId: string };
+  const agent = agents.get(name);
+  if (!agent) throw new Error(`unknown client: ${name}`);
+  const body = (req.body ?? {}) as {
+    text?: string;
+    content?: unknown;
+  };
+  const content =
+    body.content != null
+      ? body.content
+      : typeof body.text === "string"
+        ? body.text
+        : null;
+  if (content == null) {
+    throw new Error("provide either { text: string } or { content: [...] }");
+  }
+  const cmd: AgentCommand = {
+    id: randomUUID(),
+    type: "message",
+    payload: { sessionId, content: content as any },
   };
   return enqueue(name, cmd);
 });

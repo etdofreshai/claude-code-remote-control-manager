@@ -8,6 +8,8 @@ import {
   refreshSession,
   switchSession,
   setSessionEnabled,
+  sendMessage,
+  type SendContentBlock,
   listTracked,
   resumeAllTracked,
   shutdownAll,
@@ -81,7 +83,8 @@ async function pollOnce(): Promise<void> {
       | "list"
       | "refresh"
       | "setEnabled"
-      | "switch";
+      | "switch"
+      | "message";
     payload: {
       workingDirectory?: string;
       sessionId?: string;
@@ -90,6 +93,7 @@ async function pollOnce(): Promise<void> {
       model?: string;
       effort?: Effort;
       enabled?: boolean;
+      content?: SendContentBlock[] | string;
       page?: number;
       pageSize?: number;
       query?: string;
@@ -137,6 +141,10 @@ async function pollOnce(): Promise<void> {
       if (typeof cmd.payload.enabled !== "boolean")
         throw new Error("enabled (boolean) required for setEnabled");
       result = await setSessionEnabled(cmd.payload.sessionId, cmd.payload.enabled);
+    } else if (cmd.type === "message") {
+      if (!cmd.payload.sessionId) throw new Error("sessionId required for message");
+      if (cmd.payload.content == null) throw new Error("content required for message");
+      result = await sendMessage(cmd.payload.sessionId, cmd.payload.content);
     } else if (cmd.type === "switch") {
       if (!cmd.payload.sessionId) throw new Error("sessionId required for switch");
       result = await switchSession(cmd.payload.sessionId, {

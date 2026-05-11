@@ -570,6 +570,43 @@ export async function renameTracked(
  * Killing + respawning forces a fresh load.
  */
 /**
+ * Push an external message into a running session — steers/continues the
+ * conversation without going through the Claude app. Supports text and
+ * images (base64 or URL source).
+ */
+export type SendContentBlock =
+  | { type: "text"; text: string }
+  | {
+      type: "image";
+      source:
+        | { type: "base64"; media_type: string; data: string }
+        | { type: "url"; url: string };
+    };
+
+export async function sendMessage(
+  sessionId: string,
+  content: SendContentBlock[] | string,
+): Promise<{ sent: boolean; reason?: string }> {
+  if (!isUuid(sessionId)) throw new Error(`invalid session id: ${sessionId}`);
+  const rs = running.get(sessionId);
+  if (!rs) return { sent: false, reason: "session not running" };
+
+  const blocks: SendContentBlock[] =
+    typeof content === "string" ? [{ type: "text", text: content }] : content;
+  if (!Array.isArray(blocks) || blocks.length === 0)
+    throw new Error("content must be a non-empty array or string");
+
+  rs.push({
+    type: "user",
+    message: { role: "user", content: blocks },
+    parent_tool_use_id: null,
+    timestamp: new Date().toISOString(),
+  });
+  patch(sessionId, { lastMessageAt: new Date().toISOString() });
+  return { sent: true };
+}
+
+/**
  * Switch a session's provider/model/effort. Kills the running query and
  * respawns it with the new env mapping. Useful for tier-shifting a
  * conversation without losing its transcript.

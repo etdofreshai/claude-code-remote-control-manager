@@ -625,15 +625,24 @@ export async function switchSession(
   const effort = (next.effort ?? entry.effort ?? DEFAULT_EFFORT) as Effort;
 
   // Build a notice if anything actually changed.
-  const before = `${entry.provider ?? "?"}/${entry.model ?? "?"} (effort: ${entry.effort ?? "?"})`;
-  const after = `${provider}/${model ?? "?"} (effort: ${effort})`;
+  const fmt = (
+    p?: string,
+    m?: string,
+    e?: string,
+  ): string => {
+    const slug = m ? `${p ?? "default"}/${m}` : (p ?? "default");
+    return `${slug} (effort: ${e ?? "default"})`;
+  };
+  const before = fmt(entry.provider, entry.model, entry.effort);
+  const after = fmt(provider, model, effort);
   const changed =
     entry.provider !== provider ||
     entry.model !== model ||
     entry.effort !== effort;
-  const noticeText = changed
-    ? `Model/effort switched: ${before} → ${after}. No reply needed.`
-    : undefined;
+  const noticeText =
+    changed && before !== after
+      ? `Model/effort switched: ${before} → ${after}. No reply needed.`
+      : undefined;
 
   await killSession(sessionId);
   await new Promise((r) => setTimeout(r, 250));

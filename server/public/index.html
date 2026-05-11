@@ -150,6 +150,48 @@
 
       <pre id="result" class="hidden">—</pre>
     </section>
+
+    <section class="panel" id="schedules-panel" style="grid-column: 1 / -1;">
+      <h2>Scheduled messages</h2>
+      <div class="toolbar">
+        <button id="show-schedule" class="btn-primary">+ New schedule</button>
+        <button id="schedules-refresh" class="btn-secondary btn-inline">Refresh</button>
+      </div>
+      <ul id="schedules"></ul>
+
+      <div id="schedule-modal" class="modal hidden" role="dialog" aria-modal="true">
+        <div class="modal-card">
+          <h3 id="schedule-modal-title">New schedule</h3>
+          <form id="schedule-form">
+            <input type="hidden" name="id">
+            <label>Name
+              <input name="name" placeholder="(optional) friendly label">
+            </label>
+            <label>Client
+              <select name="clientName" id="schedule-client"></select>
+            </label>
+            <label>Session
+              <select name="sessionId" id="schedule-session"></select>
+            </label>
+            <label>Cron (UTC, 5-field)
+              <input name="cron" placeholder="*/15 * * * *" required>
+              <small id="schedule-cron-hint" class="modal-current">Examples: <code>*/15 * * * *</code> (every 15m), <code>0 9 * * 1-5</code> (weekdays 9am UTC), <code>0 */2 * * *</code> (every 2h)</small>
+            </label>
+            <label>Message
+              <textarea name="text" rows="4" placeholder="text sent to the session" required></textarea>
+            </label>
+            <label class="checkbox-row">
+              <input type="checkbox" name="enabled" checked>
+              Enabled
+            </label>
+            <div class="row">
+              <button>Save</button>
+              <button type="button" id="schedule-cancel" class="btn-secondary">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
   </main>
 
   <script src="/static/app.js"></script>

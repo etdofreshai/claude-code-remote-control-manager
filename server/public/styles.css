@@ -5,7 +5,9 @@ h1 { font-size: 18px; margin: 0; }
 h2 { font-size: 14px; text-transform: uppercase; color: #9aa0aa; margin: 0 0 10px; }
 h3 { font-size: 12px; text-transform: uppercase; color: #9aa0aa; margin: 12px 0 6px; }
 small { color: #9aa0aa; }
-main { display: grid; grid-template-columns: 280px 1fr; gap: 16px; padding: 16px; }
+main { display: grid; grid-template-columns: 280px 1fr; gap: 16px; padding: 16px; align-items: start; }
+.checkbox-row { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; }
+.checkbox-row input { width: auto; margin: 0; }
 .panel { background: #15171c; border: 1px solid #23262d; border-radius: 8px; padding: 14px; }
 input, button { width: 100%; padding: 8px; background: #0e0f12; color: #e7e9ee; border: 1px solid #2c303a; border-radius: 6px; font: inherit; margin-bottom: 6px; }
 button { cursor: pointer; background: #2b6cb0; border-color: #2b6cb0; }

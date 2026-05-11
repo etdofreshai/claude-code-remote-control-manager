@@ -894,5 +894,196 @@ $("#logout").addEventListener("click", async () => {
   location.href = "/login";
 });
 
+// ─── Schedules ──────────────────────────────────────────────────────
+let lastSchedules = [];
+
+async function loadSchedules() {
+  try {
+    lastSchedules = await api("/api/schedules");
+  } catch (err) {
+    console.error("loadSchedules", err);
+    return;
+  }
+  renderSchedules();
+}
+
+function renderSchedules() {
+  const ul = $("#schedules");
+  if (!ul) return;
+  ul.innerHTML = "";
+  if (!lastSchedules.length) {
+    ul.innerHTML = "<li class=empty>No schedules yet.</li>";
+    return;
+  }
+  for (const s of lastSchedules) {
+    const li = document.createElement("li");
+    const left = document.createElement("span");
+    left.className = "session-meta";
+    left.innerHTML = `<strong>${s.name}</strong><br>
+      <small>→ ${s.clientName} · <code>${s.sessionId}</code></small><br>
+      <small><code>${s.cron}</code> · next: ${s.nextRunAt ? new Date(s.nextRunAt).toLocaleString() : "—"}</small><br>
+      <small>${s.enabled ? "● enabled" : "○ disabled"} · last: ${s.lastRunAt ? new Date(s.lastRunAt).toLocaleString() : "—"}${s.lastResult ? ` (${s.lastResult.slice(0, 60)})` : ""}</small><br>
+      <small>${(s.text || "(content payload)").slice(0, 140)}</small>`;
+    li.appendChild(left);
+
+    const btns = document.createElement("div");
+    btns.className = "btn-stack";
+
+    const runBtn = document.createElement("button");
+    runBtn.textContent = "Run now";
+    runBtn.className = "btn-primary";
+    runBtn.onclick = async (e) => {
+      e.stopPropagation();
+      runBtn.disabled = true;
+      try {
+        await api(`/api/schedules/${encodeURIComponent(s.id)}/run`, { method: "POST" });
+        loadSchedules();
+      } catch (err) {
+        alert(String(err));
+      } finally {
+        runBtn.disabled = false;
+      }
+    };
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.textContent = s.enabled ? "Disable" : "Enable";
+    toggleBtn.className = s.enabled ? "btn-secondary" : "btn-primary";
+    toggleBtn.onclick = async (e) => {
+      e.stopPropagation();
+      toggleBtn.disabled = true;
+      try {
+        await api(`/api/schedules/${encodeURIComponent(s.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ enabled: !s.enabled }),
+        });
+        loadSchedules();
+      } catch (err) {
+        alert(String(err));
+        toggleBtn.disabled = false;
+      }
+    };
+
+    const editBtn = document.createElement("button");
+    editBtn.textContent = "Edit";
+    editBtn.className = "btn-secondary";
+    editBtn.onclick = (e) => {
+      e.stopPropagation();
+      openScheduleModal(s);
+    };
+
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "Delete";
+    delBtn.className = "btn-danger";
+    delBtn.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Delete schedule "${s.name}"?`)) return;
+      delBtn.disabled = true;
+      try {
+        await api(`/api/schedules/${encodeURIComponent(s.id)}`, { method: "DELETE" });
+        loadSchedules();
+      } catch (err) {
+        alert(String(err));
+        delBtn.disabled = false;
+      }
+    };
+
+    btns.appendChild(runBtn);
+    btns.appendChild(toggleBtn);
+    btns.appendChild(editBtn);
+    btns.appendChild(delBtn);
+    li.appendChild(btns);
+    ul.appendChild(li);
+  }
+}
+
+function openScheduleModal(existing) {
+  const f = $("#schedule-form");
+  f.reset();
+  f.querySelector('[name="id"]').value = existing?.id ?? "";
+  $("#schedule-modal-title").textContent = existing ? "Edit schedule" : "New schedule";
+
+  const clientSel = $("#schedule-client");
+  const sessionSel = $("#schedule-session");
+  clientSel.innerHTML = (lastClients ?? [])
+    .map((c) => `<option value="${c.name}">${c.name}</option>`)
+    .join("");
+
+  const refreshSessions = () => {
+    const c = (lastClients ?? []).find((x) => x.name === clientSel.value);
+    const sessions = (c?.sessions ?? []).slice().sort((a, b) =>
+      (a.name ?? a.sessionId).localeCompare(b.name ?? b.sessionId),
+    );
+    sessionSel.innerHTML = sessions
+      .map(
+        (s) =>
+          `<option value="${s.sessionId}">${(s.name ? s.name + " · " : "") + s.sessionId}</option>`,
+      )
+      .join("");
+    if (existing && c?.name === existing.clientName) sessionSel.value = existing.sessionId;
+  };
+  clientSel.onchange = refreshSessions;
+
+  if (existing) {
+    clientSel.value = existing.clientName;
+    refreshSessions();
+    sessionSel.value = existing.sessionId;
+    f.querySelector('[name="name"]').value = existing.name;
+    f.querySelector('[name="cron"]').value = existing.cron;
+    f.querySelector('[name="text"]').value = existing.text ?? "";
+    f.querySelector('[name="enabled"]').checked = !!existing.enabled;
+  } else {
+    if (selected) clientSel.value = selected;
+    refreshSessions();
+    f.querySelector('[name="enabled"]').checked = true;
+  }
+
+  $("#schedule-modal").classList.remove("hidden");
+  setTimeout(() => f.querySelector('[name="cron"]').focus(), 50);
+}
+
+function closeScheduleModal() {
+  $("#schedule-modal").classList.add("hidden");
+}
+
+$("#show-schedule").addEventListener("click", () => openScheduleModal(null));
+$("#schedule-cancel").addEventListener("click", closeScheduleModal);
+$("#schedule-modal").addEventListener("click", (e) => {
+  if (e.target.id === "schedule-modal") closeScheduleModal();
+});
+$("#schedules-refresh").addEventListener("click", loadSchedules);
+
+$("#schedule-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const id = f.querySelector('[name="id"]').value;
+  const body = {
+    name: f.querySelector('[name="name"]').value,
+    clientName: f.querySelector('[name="clientName"]').value,
+    sessionId: f.querySelector('[name="sessionId"]').value,
+    cron: f.querySelector('[name="cron"]').value,
+    text: f.querySelector('[name="text"]').value,
+    enabled: f.querySelector('[name="enabled"]').checked,
+  };
+  try {
+    if (id) {
+      await api(`/api/schedules/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+    } else {
+      await api(`/api/schedules`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    }
+    closeScheduleModal();
+    loadSchedules();
+  } catch (err) {
+    alert(String(err));
+  }
+});
+
 loadClients();
+loadSchedules();
 setInterval(loadClients, 5000);
+setInterval(loadSchedules, 15000);

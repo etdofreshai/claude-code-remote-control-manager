@@ -6,6 +6,18 @@ import path from "node:path";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import {
+  loadSchedules,
+  listSchedules,
+  getSchedule,
+  createSchedule,
+  updateSchedule,
+  removeSchedule,
+  reindexNextRuns,
+  tickDueSchedules,
+  validateCron,
+  type Schedule,
+} from "./schedules.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -121,6 +133,8 @@ function saveAgents(): void {
 }
 
 loadAgents();
+loadSchedules();
+reindexNextRuns();
 
 interface AgentCommand {
   id: string;
@@ -602,6 +616,85 @@ app.post("/api/agent/ack", async (req) => {
   else pending.resolve(body.result);
   return { ok: true };
 });
+
+// ─── Schedules API ─────────────────────────────────────────────────
+app.get("/api/schedules", async () => listSchedules());
+
+app.post("/api/schedules", async (req) => {
+  const body = (req.body ?? {}) as any;
+  return createSchedule({
+    name: body.name,
+    clientName: body.clientName,
+    sessionId: body.sessionId,
+    cron: body.cron,
+    text: body.text,
+    content: body.content,
+    enabled: body.enabled,
+  });
+});
+
+app.get("/api/schedules/:id", async (req) => {
+  const { id } = req.params as { id: string };
+  const s = getSchedule(id);
+  if (!s) throw new Error(`schedule ${id} not found`);
+  return s;
+});
+
+app.patch("/api/schedules/:id", async (req) => {
+  const { id } = req.params as { id: string };
+  const body = (req.body ?? {}) as any;
+  return updateSchedule(id, body);
+});
+
+app.delete("/api/schedules/:id", async (req) => {
+  const { id } = req.params as { id: string };
+  return { removed: removeSchedule(id) };
+});
+
+app.post("/api/schedules/:id/run", async (req) => {
+  const { id } = req.params as { id: string };
+  const s = getSchedule(id);
+  if (!s) throw new Error(`schedule ${id} not found`);
+  const result = await fireScheduleNow(s);
+  s.lastRunAt = new Date().toISOString();
+  s.lastResult = result;
+  updateSchedule(id, {});
+  return { ok: true, result };
+});
+
+app.get("/api/schedules/_validate", async (req) => {
+  const cron = (req.query as any)?.cron as string | undefined;
+  if (!cron) return { ok: false, error: "missing ?cron=" };
+  return validateCron(cron);
+});
+
+async function fireScheduleNow(s: Schedule): Promise<string> {
+  const agent = agents.get(s.clientName);
+  if (!agent) return `client ${s.clientName} not registered`;
+  const content =
+    s.content != null
+      ? s.content
+      : typeof s.text === "string"
+        ? s.text
+        : null;
+  if (content == null) return "no text or content";
+  const cmd: AgentCommand = {
+    id: randomUUID(),
+    type: "message",
+    payload: { sessionId: s.sessionId, content: content as any },
+  };
+  try {
+    const r = await enqueue(s.clientName, cmd);
+    return typeof r === "object" ? JSON.stringify(r) : String(r);
+  } catch (err) {
+    return `enqueue failed: ${String(err)}`;
+  }
+}
+
+// Tick loop: every 20 s, fire any schedule whose nextRunAt has passed.
+setInterval(() => {
+  tickDueSchedules(new Date(), fireScheduleNow);
+}, 20_000);
 
 app.listen({ host: "0.0.0.0", port: PORT }).catch((err) => {
   app.log.error(err);

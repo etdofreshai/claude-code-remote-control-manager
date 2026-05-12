@@ -27,6 +27,13 @@ Open http://localhost:3000, log in with `UI_PASSWORD`.
 
 Register a client by adding it to the in-memory registry from the UI, or by setting `CLIENTS` in env (JSON array).
 
+Useful server API endpoints:
+
+- `GET /api/clients` — full client objects with embedded sessions, used by the UI
+- `GET /api/clients/list` — compact list of clients with online state and session counts
+- `GET /api/clients/:name/sessions` — sessions for a single client plus client metadata
+- `POST /api/clients/:name/sessions/:sessionId/message` — send text or content blocks to a running session
+
 ### Client
 
 ```

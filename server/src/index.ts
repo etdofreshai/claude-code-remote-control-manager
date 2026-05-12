@@ -333,13 +333,64 @@ app.post("/api/logout", async (_req, reply) => {
 
 app.get("/", async (_req, reply) => reply.type("text/html").send(INDEX_HTML));
 
+function isAgentOnline(agent: Agent, now = Date.now()): boolean {
+  return now - new Date(agent.lastSeenAt).getTime() < AGENT_OFFLINE_AFTER_MS;
+}
+
+function agentWithOnline(agent: Agent, now = Date.now()): Agent & { online: boolean } {
+  return {
+    ...agent,
+    online: isAgentOnline(agent, now),
+  };
+}
+
+function getAgentOrThrow(name: string): Agent {
+  const agent = agents.get(name);
+  if (!agent) throw new Error(`unknown client: ${name}`);
+  return agent;
+}
+
 // --- UI endpoints ---
 app.get("/api/clients", async () => {
   const now = Date.now();
+  return [...agents.values()].map((a) => agentWithOnline(a, now));
+});
+
+app.get("/api/clients/list", async () => {
+  const now = Date.now();
   return [...agents.values()].map((a) => ({
-    ...a,
-    online: now - new Date(a.lastSeenAt).getTime() < AGENT_OFFLINE_AFTER_MS,
+    name: a.name,
+    hostname: a.hostname,
+    platform: a.platform,
+    defaultWorkingDirectory: a.defaultWorkingDirectory,
+    prefix: a.prefix,
+    defaultProvider: a.defaultProvider,
+    defaultEffort: a.defaultEffort,
+    registeredAt: a.registeredAt,
+    lastSeenAt: a.lastSeenAt,
+    online: isAgentOnline(a, now),
+    sessionCount: a.sessions.length,
   }));
+});
+
+app.get("/api/clients/:name/sessions", async (req) => {
+  const { name } = req.params as { name: string };
+  const agent = getAgentOrThrow(name);
+  return {
+    client: {
+      name: agent.name,
+      hostname: agent.hostname,
+      platform: agent.platform,
+      defaultWorkingDirectory: agent.defaultWorkingDirectory,
+      prefix: agent.prefix,
+      defaultProvider: agent.defaultProvider,
+      defaultEffort: agent.defaultEffort,
+      registeredAt: agent.registeredAt,
+      lastSeenAt: agent.lastSeenAt,
+      online: isAgentOnline(agent),
+    },
+    sessions: agent.sessions,
+  };
 });
 
 app.post("/api/clients/:name/sessions/new", async (req) => {

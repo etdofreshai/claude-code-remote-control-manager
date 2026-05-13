@@ -338,7 +338,9 @@ async function startQuery(opts: {
       patch(opts.sessionId, { status: "running" });
       resolveReady();
       if (outcome === "timeout") {
-        console.warn(
+        // console.log (not warn): Dokploy's runtime log endpoint only
+        // surfaces stdout, so warnings disappear in production.
+        console.log(
           `session ${opts.sessionId}: enableRemoteControl(${reason}) did not complete in ${ENABLE_RC_TIMEOUT_MS}ms — proceeding without SDK remote control (likely gateway-routed; Anthropic issues #28508/#33625/#35125)`,
         );
       } else {

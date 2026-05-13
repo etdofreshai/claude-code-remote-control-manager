@@ -64,7 +64,8 @@ All client endpoints require `Authorization: Bearer <CLIENT_TOKEN>`.
 ### Client (`client/.env`)
 - `CLIENT_TOKEN` — shared bearer token (must match server)
 - `PORT` — default `4000`
-- `ANTHROPIC_API_KEY` — used by the Claude Agent SDK
+- Native Anthropic auth comes from `~/.claude/.credentials.json` (OAuth). Do not set `ANTHROPIC_API_KEY` — the binary treats it as a long-lived API key and pops an interactive prompt, breaking headless use.
+- Gateway tokens (optional, only for gateway-routed providers): `LITELLM_TOKEN`, `SWITCHBOARD_API_KEY`, `ZAI_API_KEY`.
 
 ## Deployment
 

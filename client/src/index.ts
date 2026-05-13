@@ -21,6 +21,7 @@ import {
 } from "./sessions.js";
 import { listLocalSessions } from "./list.js";
 import { publicProviders } from "./providers.js";
+import { backfillFromDisk } from "./transcripts.js";
 import type { Effort } from "./state.js";
 
 const SERVER_URL = (process.env.SERVER_URL ?? "").replace(/\/+$/, "");
@@ -222,6 +223,14 @@ async function main(): Promise<void> {
   console.log("resuming tracked sessions...");
   await resumeAllTracked();
   await reportSessions();
+
+  // Backfill server-side transcripts from each tracked session's on-disk
+  // history. resumeAllTracked() already triggers a backfill for sessions it
+  // restarts, but disabled/stopped sessions are skipped — this loop covers
+  // every tracked session so the UI has history for all of them on first load.
+  for (const s of listTracked()) {
+    backfillFromDisk(s.sessionId, s.workingDirectory);
+  }
 
   setInterval(() => {
     register().catch((err) => console.error("re-register failed", err));

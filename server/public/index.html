@@ -1,199 +1,107 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Claude Code Remote</title>
-  <link rel="stylesheet" href="/static/styles.css">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Harness · AI session orchestrator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background: #0a0a0c;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    overflow: hidden;
+  }
+  #root { width: 100%; height: 100%; }
+  @keyframes hrnPulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.7); opacity: 0; }
+  }
+  @keyframes hrnBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+  *::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+  /* Show per-message copy button on hover of its row */
+  .hrn-msg-row:hover .hrn-copy-btn { opacity: 0.85 !important; }
+  .hrn-msg-row .hrn-copy-btn:hover { opacity: 1 !important; }
+  /* Show group grip on header hover */
+  [draggable]:hover .hrn-group-grip { opacity: 0.7 !important; }
+</style>
 </head>
 <body>
-  <header>
-    <h1>Claude Code Remote</h1>
-    <button id="logout" class="btn-inline">Logout</button>
-  </header>
+<div id="root"></div>
 
-  <main>
-    <section class="panel" id="clients-panel">
-      <h2>Clients</h2>
-      <ul id="clients"></ul>
-    </section>
+<!-- React 18 + Babel (pinned, with integrity) -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 
-    <section class="panel" id="sessions-panel">
-      <h2>Remote sessions <small id="selected-name"></small></h2>
+<!-- Plain JS data + theme -->
+<script src="/static/harness-theme.js"></script>
+<script src="/static/harness-data.js"></script>
 
-      <div class="toolbar">
-        <button id="show-new" class="btn-secondary">+ Start new</button>
-        <button id="show-bind" class="btn-secondary">+ Bind existing</button>
-      </div>
+<!-- Babel components (order matters) -->
+<script type="text/babel" src="/static/tweaks-panel.jsx"></script>
+<script type="text/babel" src="/static/harness-icons.jsx"></script>
+<script type="text/babel" src="/static/harness-providers.jsx"></script>
+<script type="text/babel" src="/static/harness-sidebar.jsx"></script>
+<script type="text/babel" src="/static/harness-chat.jsx"></script>
+<script type="text/babel" src="/static/harness-input.jsx"></script>
+<script type="text/babel" src="/static/harness-launcher.jsx"></script>
+<script type="text/babel" src="/static/harness-settings.jsx"></script>
+<script type="text/babel" src="/static/harness.jsx"></script>
 
-      <form id="new-form" class="hidden">
-        <h3>Start new session</h3>
-        <input name="name" placeholder="name (optional)">
-        <input name="workingDirectory" placeholder="/home/node/workspace/repos/foo" required>
-        <div class="row">
-          <select name="provider" data-role="provider"></select>
-          <select name="model" data-role="model"></select>
-          <select name="effort" data-role="effort"></select>
-        </div>
-        <div class="row">
-          <button>Create</button>
-          <button type="button" data-cancel class="btn-secondary">Cancel</button>
-        </div>
-      </form>
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "variant": "Eclipse",
+  "dark": false,
+  "density": "compact",
+  "sidebar": true,
+  "bubble": false
+}/*EDITMODE-END*/;
 
-      <form id="bind-form" class="hidden">
-        <h3>Bind existing session</h3>
-        <input name="workingDirectory" placeholder="working directory" required>
-        <div class="row">
-          <select name="provider" data-role="provider"></select>
-          <select name="model" data-role="model"></select>
-          <select name="effort" data-role="effort"></select>
-        </div>
-        <div class="input-with-action">
-          <input name="sessionId" placeholder="session id" required>
-          <button type="button" id="browse-sessions" class="btn-secondary btn-inline">Browse…</button>
-        </div>
-        <div id="session-browser" class="session-browser hidden">
-          <div class="session-browser-header">
-            <span id="session-browser-title">Loading…</span>
-            <button type="button" id="browse-close" class="btn-secondary btn-inline">×</button>
-          </div>
-          <input type="text" id="browse-search" placeholder="Search title or last message…" autocomplete="off">
-          <ul id="session-browser-list"></ul>
-          <div class="session-browser-footer">
-            <button type="button" id="browse-prev" class="btn-secondary btn-inline">◀ Prev</button>
-            <span id="browse-page-label"></span>
-            <button type="button" id="browse-next" class="btn-secondary btn-inline">Next ▶</button>
-          </div>
-        </div>
-        <div class="row">
-          <button>Bind</button>
-          <button type="button" data-cancel class="btn-secondary">Cancel</button>
-        </div>
-      </form>
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  return (
+    <>
+      <Harness tweaks={t} setTweak={setTweak} data={window.HARNESS_DATA} />
 
-      <div class="session-controls">
-        <label>Sort
-          <select id="sort-primary">
-            <option value="lastMessage">Last message</option>
-            <option value="name">Name (a–z)</option>
-            <option value="enabled">Enabled first</option>
-            <option value="model">Model</option>
-            <option value="provider">Provider</option>
-          </select>
-        </label>
-        <label>Then
-          <select id="sort-secondary">
-            <option value="">—</option>
-            <option value="lastMessage">Last message</option>
-            <option value="name">Name (a–z)</option>
-            <option value="enabled">Enabled first</option>
-            <option value="model">Model</option>
-            <option value="provider">Provider</option>
-          </select>
-        </label>
-        <label>Group by
-          <select id="group-by">
-            <option value="">—</option>
-            <option value="model">Model</option>
-            <option value="provider">Provider</option>
-            <option value="enabled">Enabled / Disabled</option>
-          </select>
-        </label>
-      </div>
+      <TweaksPanel>
+        <TweakSection label="Appearance" />
+        <TweakRadio
+          label="Variant"
+          value={t.variant}
+          options={['Eclipse', 'Ember', 'Console']}
+          onChange={(v) => setTweak('variant', v)}
+        />
+        <TweakToggle label="Dark mode" value={t.dark} onChange={(v) => setTweak('dark', v)} />
+        <TweakRadio
+          label="Density"
+          value={t.density}
+          options={['compact', 'comfy']}
+          onChange={(v) => setTweak('density', v)}
+        />
+        <TweakSection label="Layout" />
+        <TweakToggle label="Show sidebar" value={t.sidebar} onChange={(v) => setTweak('sidebar', v)} />
+        <TweakRadio
+          label="Messages"
+          value={t.bubble ? 'bubble' : 'flat'}
+          options={['flat', 'bubble']}
+          onChange={(v) => setTweak('bubble', v === 'bubble')}
+        />
+      </TweaksPanel>
+    </>
+  );
+}
 
-      <ul id="sessions"></ul>
-
-      <!-- Send-message modal -->
-      <div id="send-modal" class="modal hidden" role="dialog" aria-modal="true">
-        <div class="modal-card">
-          <h3>Send message</h3>
-          <p id="send-target" class="modal-current"></p>
-          <form id="send-form">
-            <label>Text
-              <textarea name="text" rows="6" placeholder="Steer the session…" required></textarea>
-            </label>
-            <details>
-              <summary>Attach image (optional)</summary>
-              <input type="file" name="image" accept="image/*">
-              <p class="modal-current">PNG/JPEG/WebP. Sent as a base64 image block alongside the text.</p>
-            </details>
-            <div class="row">
-              <button>Send</button>
-              <button type="button" id="send-cancel" class="btn-secondary">Cancel</button>
-            </div>
-          </form>
-        </div>
-      </div>
-
-      <!-- Switch modal -->
-      <div id="switch-modal" class="modal hidden" role="dialog" aria-modal="true">
-        <div class="modal-card">
-          <h3>Switch session</h3>
-          <p id="switch-current" class="modal-current"></p>
-          <form id="switch-form">
-            <label>Provider
-              <select name="provider"></select>
-            </label>
-            <label>Model
-              <select name="model"></select>
-            </label>
-            <label>Effort
-              <select name="effort"></select>
-            </label>
-            <div class="row">
-              <button>Switch</button>
-              <button type="button" id="switch-cancel" class="btn-secondary">Cancel</button>
-            </div>
-          </form>
-        </div>
-      </div>
-
-      <pre id="result" class="hidden">—</pre>
-    </section>
-
-    <section class="panel" id="schedules-panel" style="grid-column: 1 / -1;">
-      <h2>Scheduled messages</h2>
-      <div class="toolbar">
-        <button id="show-schedule" class="btn-primary">+ New schedule</button>
-        <button id="schedules-refresh" class="btn-secondary btn-inline">Refresh</button>
-      </div>
-      <ul id="schedules"></ul>
-
-      <div id="schedule-modal" class="modal hidden" role="dialog" aria-modal="true">
-        <div class="modal-card">
-          <h3 id="schedule-modal-title">New schedule</h3>
-          <form id="schedule-form">
-            <input type="hidden" name="id">
-            <label>Name
-              <input name="name" placeholder="(optional) friendly label">
-            </label>
-            <label>Client
-              <select name="clientName" id="schedule-client"></select>
-            </label>
-            <label>Session
-              <select name="sessionId" id="schedule-session"></select>
-            </label>
-            <label>Cron (UTC, 5-field)
-              <input name="cron" placeholder="*/15 * * * *" required>
-              <small id="schedule-cron-hint" class="modal-current">Examples: <code>*/15 * * * *</code> (every 15m), <code>0 9 * * 1-5</code> (weekdays 9am UTC), <code>0 */2 * * *</code> (every 2h)</small>
-            </label>
-            <label>Message
-              <textarea name="text" rows="4" placeholder="text sent to the session" required></textarea>
-            </label>
-            <label class="checkbox-row">
-              <input type="checkbox" name="enabled" checked>
-              Enabled
-            </label>
-            <div class="row">
-              <button>Save</button>
-              <button type="button" id="schedule-cancel" class="btn-secondary">Cancel</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <script src="/static/app.js"></script>
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
 </body>
 </html>

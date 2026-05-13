@@ -1,4 +1,14 @@
-FROM node:20-alpine AS builder
+# ─── Stage 1: build the SPA with Vite ───────────────────────────────
+FROM node:20-alpine AS web-builder
+WORKDIR /web
+COPY server/web/package*.json ./
+RUN npm install
+COPY server/web ./
+# Vite emits to ../public (relative to /web), i.e. /public
+RUN npm run build
+
+# ─── Stage 2: compile the server TypeScript ─────────────────────────
+FROM node:20-alpine AS server-builder
 WORKDIR /app
 ARG BUILD_SHA=
 ARG BUILD_DATETIME=
@@ -16,11 +26,12 @@ RUN npm run build \
     && printf '{"sha":"%s","datetime":"%s"}\n' "$sha" "$dt" > dist/version.json \
     && cat dist/version.json
 
+# ─── Stage 3: runtime ───────────────────────────────────────────────
 FROM node:20-alpine
 WORKDIR /app
 COPY server/package*.json ./
 RUN npm install --omit=dev
-COPY --from=builder /app/dist ./dist
-COPY server/public ./public
+COPY --from=server-builder /app/dist ./dist
+COPY --from=web-builder /public ./public
 EXPOSE 3000
 CMD ["node", "dist/index.js"]

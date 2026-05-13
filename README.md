@@ -20,12 +20,23 @@ Browser UI → Server → Client Agent → Claude Agent SDK → Claude Code
 cd server
 cp .env.example .env
 npm install
-npm run dev
+npm run build:web    # one-time: install + build the Vite SPA into ./public
+npm run dev          # start Fastify on :3000 (serves the built SPA at /)
 ```
 
-Open http://localhost:3000, log in with `UI_PASSWORD`.
+Open http://localhost:3000 and log in with `UI_PASSWORD`.
 
-Register a client by adding it to the in-memory registry from the UI, or by setting `CLIENTS` in env (JSON array).
+For active UI development, run the Vite dev server in a second terminal — it
+hot-reloads and proxies `/api/*` to Fastify:
+
+```
+cd server/web
+npm install
+npm run dev          # http://localhost:5173
+```
+
+Clients register themselves at runtime; there's no manual UI entry. See
+**Client** below.
 
 Useful server API endpoints:
 
@@ -38,20 +49,28 @@ Useful server API endpoints:
 
 ```
 cd client
-cp .env.example .env
+cp .env.example .env       # set SERVER_URL + CLIENT_TOKEN (must match server)
 npm install
 npm run dev
 ```
 
-The client must run on a machine where Claude Code and the Claude Agent SDK are installed. It exposes:
+The client must run on a machine where Claude Code and the Claude Agent SDK are
+installed. On startup it:
 
-- `GET  /health`
-- `POST /session/create`
-- `POST /session/connect`
-- `POST /session/prompt`
-- `GET  /session/list`
+1. POSTs `/api/agent/register` with `{name, hostname, platform, providers, ...}`
+   using `Authorization: Bearer ${CLIENT_TOKEN}`. The same token authorizes
+   every subsequent agent request.
+2. Long-polls `GET /api/agent/poll?name=<name>` (25 s timeout). When the server
+   has a queued command (new/bind/list/rename/switch/message/etc.) it responds;
+   the client executes it locally and posts the result to `POST /api/agent/ack`.
+3. Periodically reports its current session list via `POST /api/agent/sessions`.
 
-All client endpoints require `Authorization: Bearer <CLIENT_TOKEN>`.
+The server marks a client "online" if it has been seen in the last 60 s
+(`AGENT_OFFLINE_AFTER_MS`). Polling implicitly refreshes the last-seen
+timestamp, so an idle client stays online by polling.
+
+Multiple clients can register against one server — each is identified by its
+`name` (defaults to `os.hostname()`, overridable via `AGENT_NAME`).
 
 ## Env
 

@@ -245,7 +245,16 @@ await app.register(fastifyStatic, {
 });
 
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
-const INDEX_HTML = readFileSync(path.join(PUBLIC_DIR, "index.html"), "utf8");
+const INDEX_PATH = path.join(PUBLIC_DIR, "index.html");
+// The Vite build emits index.html. In dev (before `npm run --prefix server/web
+// build`), it may not exist yet — fall back to a friendly stub so the API
+// still works and the user sees a clear hint.
+const INDEX_HTML = existsSync(INDEX_PATH)
+  ? readFileSync(INDEX_PATH, "utf8")
+  : `<!doctype html><html><body style="font-family:system-ui;padding:32px;color:#444">
+<h1>Frontend not built</h1>
+<p>Run <code>npm install &amp;&amp; npm run build</code> in <code>server/web/</code>, or start the Vite dev server with <code>npm run dev</code> in <code>server/web/</code>.</p>
+</body></html>`;
 
 const isAuthed = (req: any) => {
   if (req.cookies?.[SESSION_COOKIE] === SESSION_VALUE) return true;
@@ -292,38 +301,10 @@ app.get("/version", async () => {
   }
 });
 
-app.get("/login", async (_req, reply) => {
-  reply.type("text/html").send(`<!doctype html><html><head><meta charset="utf-8"><title>Login</title><link rel="stylesheet" href="/static/styles.css"></head><body class="login">
-  <form id="login-form" class="card">
-    <h1>Claude Code Remote</h1>
-    <input type="password" name="password" placeholder="Password" autofocus required>
-    <button>Sign in</button>
-    <p id="login-error" style="color:#fc8181;display:none;margin:8px 0 0;font-size:12px;"></p>
-  </form>
-  <script>
-    if (localStorage.getItem("ccrcm_token")) location.href = "/";
-    document.getElementById("login-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const password = e.target.password.value;
-      try {
-        const res = await fetch("/api/login", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ password }),
-        });
-        if (!res.ok) throw new Error("Wrong password");
-        const { token } = await res.json();
-        localStorage.setItem("ccrcm_token", token);
-        location.href = "/";
-      } catch (err) {
-        const el = document.getElementById("login-error");
-        el.textContent = String(err.message || err);
-        el.style.display = "block";
-      }
-    });
-  </script>
-  </body></html>`);
-});
+// /login is now part of the SPA. Serve the same bundle; the React app
+// renders <Login /> when no token is present in localStorage and <App />
+// otherwise.
+app.get("/login", async (_req, reply) => reply.type("text/html").send(INDEX_HTML));
 
 app.post("/api/login", async (req, reply) => {
   const body = (req.body ?? {}) as { password?: string };

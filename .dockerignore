@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/.env
+**/.env.local
+*.log
+.DS_Store
+
+# Vite build output — re-generated inside the Dockerfile's web-builder stage.
+server/public/index.html
+server/public/assets
+
+# Local web build cache
+server/web/dist

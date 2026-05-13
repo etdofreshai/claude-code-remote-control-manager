@@ -80,7 +80,18 @@ RUN npm install
 
 COPY --chown=node:node client/tsconfig.json ./
 COPY --chown=node:node client/src ./src
-RUN npm run build
+# .git is copied so build-time `git rev-parse --short HEAD` works. It is read
+# only inside this RUN and is not referenced at runtime — but it still ships
+# in the image because this is a single-stage build, which is fine for an
+# outbound-only client.
+COPY --chown=node:node .git ./.git
+ARG BUILD_SHA=
+ARG BUILD_DATETIME=
+RUN npm run build \
+    && sha="${BUILD_SHA:-$(git rev-parse --short HEAD 2>/dev/null || echo dev)}" \
+    && dt="${BUILD_DATETIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" \
+    && printf '{"sha":"%s","datetime":"%s"}\n' "$sha" "$dt" > dist/version.json \
+    && cat dist/version.json
 
 ENV CLAUDE_CODE_EXECUTABLE=/usr/local/bin/claude
 

@@ -63,6 +63,8 @@ interface Agent {
   providers?: Record<string, ProviderInfo>;
   defaultProvider?: string;
   defaultEffort?: string;
+  buildSha?: string;
+  buildDatetime?: string;
   registeredAt: string;
   lastSeenAt: string;
   sessions: TrackedSession[];
@@ -184,6 +186,8 @@ function touchAgent(name: string, info: Partial<Agent> = {}): Agent {
     providers: info.providers ?? prev?.providers,
     defaultProvider: info.defaultProvider ?? prev?.defaultProvider,
     defaultEffort: info.defaultEffort ?? prev?.defaultEffort,
+    buildSha: info.buildSha ?? prev?.buildSha,
+    buildDatetime: info.buildDatetime ?? prev?.buildDatetime,
     registeredAt: prev?.registeredAt ?? now,
     lastSeenAt: now,
     sessions: info.sessions ?? prev?.sessions ?? [],
@@ -261,7 +265,8 @@ app.addHook("preHandler", async (req, reply) => {
     url === "/login" ||
     url.startsWith("/static/") ||
     url === "/api/login" ||
-    url === "/healthz"
+    url === "/healthz" ||
+    url === "/version"
   ) {
     return;
   }
@@ -275,6 +280,17 @@ app.addHook("preHandler", async (req, reply) => {
 });
 
 app.get("/healthz", async () => ({ ok: true }));
+
+app.get("/version", async () => {
+  try {
+    const info = JSON.parse(
+      readFileSync(path.join(__dirname, "version.json"), "utf8"),
+    ) as { sha?: string; datetime?: string };
+    return { service: "CCRCM Server", ...info };
+  } catch {
+    return { service: "CCRCM Server", sha: "dev", datetime: "unknown" };
+  }
+});
 
 app.get("/login", async (_req, reply) => {
   reply.type("text/html").send(`<!doctype html><html><head><meta charset="utf-8"><title>Login</title><link rel="stylesheet" href="/static/styles.css"></head><body class="login">
@@ -366,6 +382,8 @@ app.get("/api/clients/list", async () => {
     prefix: a.prefix,
     defaultProvider: a.defaultProvider,
     defaultEffort: a.defaultEffort,
+    buildSha: a.buildSha,
+    buildDatetime: a.buildDatetime,
     registeredAt: a.registeredAt,
     lastSeenAt: a.lastSeenAt,
     online: isAgentOnline(a, now),
@@ -385,6 +403,8 @@ app.get("/api/clients/:name/sessions", async (req) => {
       prefix: agent.prefix,
       defaultProvider: agent.defaultProvider,
       defaultEffort: agent.defaultEffort,
+      buildSha: agent.buildSha,
+      buildDatetime: agent.buildDatetime,
       registeredAt: agent.registeredAt,
       lastSeenAt: agent.lastSeenAt,
       online: isAgentOnline(agent),

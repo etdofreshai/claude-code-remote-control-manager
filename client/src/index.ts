@@ -1,4 +1,7 @@
 import os from "node:os";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   startNew,
   bindExisting,
@@ -27,6 +30,21 @@ const DEFAULT_WORKING_DIRECTORY = process.env.DEFAULT_WORKING_DIRECTORY ?? "";
 
 if (!SERVER_URL) throw new Error("SERVER_URL required");
 if (!CLIENT_TOKEN) throw new Error("CLIENT_TOKEN required");
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function loadBuildInfo(): { sha: string; datetime: string } {
+  try {
+    const info = JSON.parse(
+      readFileSync(path.join(__dirname, "version.json"), "utf8"),
+    ) as { sha?: string; datetime?: string };
+    return { sha: info.sha ?? "dev", datetime: info.datetime ?? "unknown" };
+  } catch {
+    return { sha: "dev", datetime: "unknown" };
+  }
+}
+const BUILD_INFO = loadBuildInfo();
+console.log(`ccrcm-client built sha=${BUILD_INFO.sha} datetime=${BUILD_INFO.datetime}`);
 
 const headers = {
   "content-type": "application/json",
@@ -65,6 +83,8 @@ async function register(): Promise<void> {
     defaultProvider: process.env.DEFAULT_PROVIDER?.trim() || "claude",
     defaultEffort: (process.env.REASONING_EFFORT?.trim() || "low") as Effort,
     sessions: listTracked(),
+    buildSha: BUILD_INFO.sha,
+    buildDatetime: BUILD_INFO.datetime,
   });
 }
 

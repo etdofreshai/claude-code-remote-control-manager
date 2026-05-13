@@ -33,6 +33,7 @@ export type ProvidersConfig = Record<string, ProviderConfig>;
 const LITELLM_DEFAULT_BASE_URL = "https://litellm.etdofresh.com";
 const BRIDGE_DEFAULT_BASE_URL = "https://ccrcm-bridge.etdofresh.com";
 const ZAI_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic";
+const SWITCHBOARD_DEFAULT_BASE_URL = "https://switchboard.etdofresh.com";
 
 function defaultProviders(): ProvidersConfig {
   const liteToken = process.env.LITELLM_TOKEN?.trim();
@@ -41,6 +42,10 @@ function defaultProviders(): ProvidersConfig {
     process.env.BRIDGE_BASE_URL?.trim() || BRIDGE_DEFAULT_BASE_URL;
   const zaiToken = process.env.ZAI_API_KEY?.trim();
   const zaiUrl = process.env.ZAI_BASE_URL?.trim() || ZAI_ANTHROPIC_BASE_URL;
+  const switchboardToken =
+    process.env.SWITCHBOARD_API_KEY?.trim() || "switchboard";
+  const switchboardUrl =
+    process.env.SWITCHBOARD_BASE_URL?.trim() || SWITCHBOARD_DEFAULT_BASE_URL;
   return {
     claude: {
       // glm-5.1 sits in the Claude provider for UX simplicity — it's
@@ -65,6 +70,27 @@ function defaultProviders(): ProvidersConfig {
       modelOverrides: {
         codex: { baseUrl: bridgeUrl, authToken: liteToken },
       },
+    },
+    switchboard: {
+      // Anthropic-compatible gateway hosted at switchboard.etdofresh.com.
+      // /v1/messages sits at the root, so we pass the bare domain as
+      // ANTHROPIC_BASE_URL. The gateway routes by the "switchboard/<name>"
+      // model id, fanning out to Claude, GLM, Gemini, GPT, Codex, etc.
+      baseUrl: switchboardUrl,
+      authToken: switchboardToken,
+      models: [
+        "switchboard/claude",
+        "switchboard/claude-opus-4-7",
+        "switchboard/codex",
+        "switchboard/gemini",
+        "switchboard/gemini-3.1-pro-preview",
+        "switchboard/glm",
+        "switchboard/glm-5.1",
+        "switchboard/glm-vision",
+        "switchboard/glm-vision-anthropic",
+        "switchboard/glm-vision-coding",
+        "switchboard/gpt-5.5",
+      ],
     },
   };
 }

@@ -311,45 +311,37 @@ async function startQuery(opts: {
   });
   ready.catch(() => {});
 
-  // q.enableRemoteControl(true) hangs forever for gateway-routed sessions:
-  // the claude binary's claude.ai bridge handshake (OAuth) never completes
-  // when ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN are set, so the binary
-  // never writes the matching control_response. Race the call against a
-  // short timeout and proceed without SDK-level remote control so the
-  // session is still usable for message passing.
+  // q.enableRemoteControl(true) tells the claude binary to open a bridge
+  // connection to claude.ai. For gateway-routed sessions (ANTHROPIC_BASE_URL
+  // + ANTHROPIC_AUTH_TOKEN set, i.e. switchboard / litellm bridge / z.ai)
+  // the binary refuses the bridge handshake and rejects within milliseconds
+  // with `Remote Control initialization failed`. The session is still fully
+  // usable for normal message I/O over the gateway — we just don't get the
+  // SDK's live control surface (setModel/setPermissionMode/etc).
   // Open Anthropic issues: #28508, #33625, #35125.
-  const ENABLE_RC_TIMEOUT_MS = 3000;
   let enabled = false;
   const enable = async (reason: string) => {
     if (enabled) return;
     enabled = true;
-    const rcPromise: Promise<unknown> = q.enableRemoteControl(true);
-    rcPromise.catch(() => {}); // suppress late rejection after timeout
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<"timeout">((res) => {
-      timeoutHandle = setTimeout(() => res("timeout"), ENABLE_RC_TIMEOUT_MS);
-    });
     try {
-      const outcome = await Promise.race([
-        rcPromise.then(() => "ok" as const),
-        timeoutPromise,
-      ]);
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+      await q.enableRemoteControl(true);
       patch(opts.sessionId, { status: "running" });
       resolveReady();
-      if (outcome === "timeout") {
-        // console.log (not warn): Dokploy's runtime log endpoint only
-        // surfaces stdout, so warnings disappear in production.
-        console.log(
-          `session ${opts.sessionId}: enableRemoteControl(${reason}) did not complete in ${ENABLE_RC_TIMEOUT_MS}ms — proceeding without SDK remote control (likely gateway-routed; Anthropic issues #28508/#33625/#35125)`,
-        );
-      } else {
-        console.log(`session ${opts.sessionId}: remote control enabled (${reason})`);
-      }
+      console.log(`session ${opts.sessionId}: remote control enabled (${reason})`);
     } catch (err) {
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+      const msg = (err as { message?: string })?.message ?? String(err);
+      if (/Remote Control initialization failed/i.test(msg)) {
+        // Expected on gateway routes. Keep the session running so callers
+        // can still send messages; we just don't have the SDK control surface.
+        patch(opts.sessionId, { status: "running" });
+        resolveReady();
+        console.log(
+          `session ${opts.sessionId}: remote control unavailable on this provider (${reason}) — session still usable for message I/O`,
+        );
+        return;
+      }
       enabled = false;
-      console.error(`session ${opts.sessionId}: enableRemoteControl failed (${reason})`, err);
+      console.log(`session ${opts.sessionId}: enableRemoteControl failed (${reason})`, err);
       patch(opts.sessionId, { status: "errored" });
       rejectReady(err);
     }

@@ -18,6 +18,12 @@ import {
   validateCron,
   type Schedule,
 } from "./schedules.js";
+import {
+  appendMessages as transcriptAppend,
+  readPage as transcriptReadPage,
+  deleteTranscript,
+  type TranscriptMessage,
+} from "./transcripts.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -619,6 +625,8 @@ app.delete("/api/clients/:name/sessions/:sessionId", async (req) => {
   agent.sessions = agent.sessions.filter((s) => s.sessionId !== sessionId);
   agents.set(name, { ...agent, lastSeenAt: agent.lastSeenAt });
   saveAgents();
+  // Drop the cached transcript too — keeping it would just be orphaned.
+  try { deleteTranscript(name, sessionId); } catch (err) { app.log.warn({ err }, "deleteTranscript"); }
   const cmd: AgentCommand = {
     id: randomUUID(),
     type: "remove",
@@ -630,7 +638,58 @@ app.delete("/api/clients/:name/sessions/:sessionId", async (req) => {
   return { removedFromServer: before !== agent.sessions.length, queued: true };
 });
 
+// --- Transcripts: read (UI) -------------------------------------------------
+//
+// Paginated, role-filterable, in-session-searchable view of the messages the
+// client has pushed for one session. Cursor is "messages already consumed
+// from the newest end": cursor=0 ⇒ latest page; cursor=N ⇒ skip the N newest
+// and return the next page of older messages.
+//
+//   GET /api/clients/:name/sessions/:id/messages
+//     ?cursor=0&limit=50&role=user,assistant&search=foo
+//
+app.get("/api/clients/:name/sessions/:id/messages", async (req) => {
+  const { name, id } = req.params as { name: string; id: string };
+  const q = (req.query ?? {}) as Record<string, string | undefined>;
+  const cursor = q.cursor ? Number(q.cursor) : 0;
+  const limit = q.limit ? Number(q.limit) : 50;
+  const roles = q.role
+    ? String(q.role)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : undefined;
+  const search = q.search ? String(q.search) : undefined;
+  return transcriptReadPage(name, id, { cursor, limit, roles, search });
+});
+
 // --- Agent endpoints ---
+//
+// Client pushes session messages here. `replace: true` truncates the file
+// first (used for full-history backfill on session resume). Otherwise the
+// new messages are appended in order.
+app.post("/api/agent/transcripts/append", async (req) => {
+  const body = (req.body ?? {}) as {
+    name?: string;
+    sessionId?: string;
+    messages?: unknown[];
+    replace?: boolean;
+  };
+  if (!body.name) throw new Error("name required");
+  if (!body.sessionId) throw new Error("sessionId required");
+  if (!Array.isArray(body.messages))
+    throw new Error("messages array required");
+  // Refresh agent's last-seen so a pushing agent stays online even between polls.
+  touchAgent(body.name);
+  const result = transcriptAppend(
+    body.name,
+    body.sessionId,
+    body.messages as TranscriptMessage[],
+    !!body.replace,
+  );
+  return result;
+});
+
 app.post("/api/agent/register", async (req) => {
   const body = req.body as Partial<Agent>;
   if (!body?.name) throw new Error("name required");

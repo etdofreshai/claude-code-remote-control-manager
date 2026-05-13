@@ -6,6 +6,7 @@ import os from "node:os";
 import { load, save, type TrackedSession, type Effort } from "./state.js";
 import { readSessionTitle } from "./list.js";
 import { getProvider, resolveEndpoint } from "./providers.js";
+import { recordSdkMessage } from "./transcripts.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (s: string) => UUID_RE.test(s);
@@ -365,6 +366,9 @@ async function startQuery(opts: {
           patch(opts.sessionId, { lastMessageAt: new Date().toISOString() });
           if (!enabled) await enable("first-message");
         }
+        // Fire-and-forget replicate to the server's transcript store; the SDK's
+        // local session file on disk remains the source of truth.
+        recordSdkMessage(opts.sessionId, msg);
       }
       patch(opts.sessionId, { status: "stopped" });
     } catch (err) {

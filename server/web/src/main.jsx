@@ -20,8 +20,12 @@ import './components/harness.jsx';
 
 import { hasToken } from './api/client.js';
 import { useHarnessData } from './api/use-harness-data.js';
+import { useTranscript } from './api/use-transcript.js';
 import { makeActions } from './api/actions.js';
 import { Login } from './login.jsx';
+
+// Expose the transcript hook to the IIFE-style component bundle.
+window.useTranscript = useTranscript;
 
 const { useState, useMemo } = React;
 

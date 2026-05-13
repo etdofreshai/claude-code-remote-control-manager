@@ -429,9 +429,33 @@
     const streamTimer = useRef(null);
 
     const session = data.sessions.find((s) => s.id === activeId) || data.sessions[0];
-    const baseMessages = session && data.chats[session.id] || (session ? [
-    { role: 'assistant', time: Date.now(), kind: 'text',
-      text: `Session "${session.title}" — ${session.msgs} messages. Transcript loading is not wired yet; new messages you send are queued to the agent.` }] : []);
+
+    // Real transcript replicated from the agent (paginated, role-filterable,
+    // searchable). Falls back to an empty list if no session is selected or
+    // nothing has been pushed yet — the UI then just shows the optimistic
+    // local echo for in-flight sends.
+    const transcript = window.useTranscript(session?.clientName ?? null, session?.sessionId ?? null);
+    const baseMessages = (transcript.messages || []).map((m) => ({
+      ...m,
+      // The chat renderer keys timestamps off `time` (epoch ms); transcripts
+      // store ISO strings in `ts`. Translate.
+      time: typeof m.time === 'number' ? m.time : Date.parse(m.ts) || Date.now(),
+    }));
+
+    // Once the server transcript grows, the agent has replicated whatever
+    // we echoed locally — drop the optimistic copy to avoid duplicates.
+    const lastTotalRef = useRef(0);
+    useEffect(() => {
+      if (!session) return;
+      if (transcript.total > lastTotalRef.current) {
+        lastTotalRef.current = transcript.total;
+        setLocalMessages((prev) => {
+          if (!prev[session.id] || prev[session.id].length === 0) return prev;
+          const { [session.id]: _, ...rest } = prev;
+          return rest;
+        });
+      }
+    }, [transcript.total, session?.id]);
 
     const extras = session ? (localMessages[session.id] || []) : [];
     const messages = [...baseMessages, ...extras];

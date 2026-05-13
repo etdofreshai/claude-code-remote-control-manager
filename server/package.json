@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "build:web": "npm --prefix ./web install && npm --prefix ./web run build",
+    "build:all": "npm run build:web && npm run build",
     "start": "node dist/index.js"
   },
   "dependencies": {

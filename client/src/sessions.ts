@@ -6,7 +6,7 @@ import os from "node:os";
 import { load, save, type TrackedSession, type Effort } from "./state.js";
 import { readSessionTitle } from "./list.js";
 import { getProvider, resolveEndpoint } from "./providers.js";
-import { recordSdkMessage } from "./transcripts.js";
+import { recordSdkMessage, backfillFromDisk } from "./transcripts.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (s: string) => UUID_RE.test(s);
@@ -301,6 +301,15 @@ async function startQuery(opts: {
   console.log(
     `query[${opts.provider}${opts.model ? "/" + opts.model : ""}@${opts.effort}]: sessionId=${opts.sessionId} resume=${opts.resume} cwd=${opts.workingDirectory}`,
   );
+
+  // Backfill the server's transcript store with the tail of the on-disk
+  // session file so resumed sessions show some history immediately instead
+  // of looking empty until new activity flows through the for-await loop.
+  // Fire-and-forget; the SDK has its own copy on disk and is the source of
+  // truth, so a push failure is non-fatal.
+  if (opts.resume) {
+    backfillFromDisk(opts.sessionId, opts.workingDirectory);
+  }
 
   const q = query({ prompt: stream, options: queryOptions }) as any;
 

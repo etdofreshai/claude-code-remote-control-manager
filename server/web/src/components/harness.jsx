@@ -388,7 +388,7 @@
 
   }
 
-  function ChatScreen({ session, messages, theme, variant, tweaks, onSend, onStop, onSteer, isStreaming, onKill, onRevive, environments, gitRepos, onRename, onArchive, onDelete, onSwitchModel }) {
+  function ChatScreen({ session, messages, theme, variant, tweaks, onSend, onStop, onSteer, isStreaming, onKill, onRevive, environments, gitRepos, onRename, onArchive, onDelete, onSwitchModel, onLoadOlder, hasOlder, loadingOlder }) {
     return (
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: theme.bg }}>
         <window.ChatLog
@@ -400,7 +400,10 @@
           session={session}
           onRename={onRename}
           onArchive={onArchive}
-          onDelete={onDelete} />
+          onDelete={onDelete}
+          onLoadOlder={onLoadOlder}
+          hasOlder={hasOlder}
+          loadingOlder={loadingOlder} />
 
         {/* Status bar — directly above input box */}
         <StatusBar session={session} theme={theme} variant={variant} isStreaming={isStreaming} onKill={onKill} onRevive={onRevive} environments={environments} gitRepos={gitRepos} />
@@ -624,6 +627,9 @@
             onArchive={handleArchive}
             onDelete={handleDelete}
             onSwitchModel={handleSwitchModel}
+            onLoadOlder={transcript.loadMore}
+            hasOlder={!!transcript.hasMore}
+            loadingOlder={!!transcript.loading}
             isStreaming={streaming}
             environments={data.environments}
             gitRepos={data.gitRepos} />

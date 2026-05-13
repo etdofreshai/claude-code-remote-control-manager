@@ -5,6 +5,8 @@
 // file on disk remains the local source of truth.
 
 import os from "node:os";
+import path from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 
 export interface TranscriptMessage {
   id?: string;
@@ -171,4 +173,84 @@ export function backfillTranscript(
   messages: TranscriptMessage[],
 ): Promise<void> {
   return postAppend(sessionId, messages, true);
+}
+
+// Claude Code stores transcripts under ~/.claude/projects/<key>/<sessionId>.jsonl
+// where <key> is the absolute working directory with path separators and
+// Windows drive colons flattened to "-". Matches the helper in list.ts.
+function projectKey(workingDirectory: string): string {
+  return workingDirectory.replace(/[\\/:]/g, "-");
+}
+
+function localSessionFile(workingDirectory: string, sessionId: string): string {
+  return path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    projectKey(workingDirectory),
+    `${sessionId}.jsonl`,
+  );
+}
+
+/**
+ * Read the last `n` *canonical* messages from a session's on-disk transcript
+ * and return them in chronological order. Used to backfill resumed sessions
+ * so the UI has some history to show even before new activity flows.
+ *
+ * The on-disk file may contain non-message entries (custom-title records,
+ * compaction markers, etc.) and may yield multiple canonical messages per
+ * line (assistant turns often pack text + tool_use). We scan from the end,
+ * normalize as we go, and stop once we have `n` canonical entries.
+ */
+export function readTailFromDisk(
+  workingDirectory: string,
+  sessionId: string,
+  n: number,
+): TranscriptMessage[] {
+  if (n <= 0) return [];
+  const file = localSessionFile(workingDirectory, sessionId);
+  if (!existsSync(file)) return [];
+  let content: string;
+  try {
+    content = readFileSync(file, "utf8");
+  } catch (err) {
+    console.error(`readTailFromDisk ${file} failed`, err);
+    return [];
+  }
+  const lines = content.split("\n").filter((l) => l.length > 0);
+  // Collect canonical messages from newest to oldest, stop once we have n.
+  const reversed: TranscriptMessage[] = [];
+  for (let i = lines.length - 1; i >= 0 && reversed.length < n; i--) {
+    let obj: unknown;
+    try { obj = JSON.parse(lines[i]); } catch { continue; }
+    const normalized = normalize(obj);
+    // Push in reverse so the final array, when reversed, is chronological.
+    for (let j = normalized.length - 1; j >= 0; j--) {
+      reversed.push(normalized[j]);
+      if (reversed.length >= n) break;
+    }
+  }
+  return reversed.reverse();
+}
+
+const BACKFILL_DEFAULT = Number(process.env.TRANSCRIPT_BACKFILL_N ?? 100);
+
+/**
+ * Convenience: read the local tail and push it to the server with
+ * `replace: true` so the server's copy reflects current disk state.
+ * Fire-and-forget — errors are logged and swallowed.
+ */
+export function backfillFromDisk(
+  sessionId: string,
+  workingDirectory: string,
+  n: number = BACKFILL_DEFAULT,
+): void {
+  (async () => {
+    try {
+      const tail = readTailFromDisk(workingDirectory, sessionId, n);
+      if (tail.length) await backfillTranscript(sessionId, tail);
+    } catch (err) {
+      console.error(`backfillFromDisk ${sessionId} failed`, err);
+    }
+  })();
 }

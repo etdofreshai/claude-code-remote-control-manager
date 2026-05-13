@@ -905,15 +905,56 @@
 
   }
 
-  function ChatLog({ messages, theme, variant, bubble, density, sessionTitle, session, onRename, onArchive, onDelete }) {
+  function ChatLog({ messages, theme, variant, bubble, density, sessionTitle, session, onRename, onArchive, onDelete, onLoadOlder, hasOlder, loadingOlder }) {
     const scrollRef = useRef(null);
     const [view, setView] = useState('transcript');
     const [copied, setCopied] = useState(false);
     const copyTimer = useRef(null);
+    // Track previous render's scroll state so we can:
+    //   - keep the view anchored when older messages prepend (loadMore)
+    //   - follow new messages when the user was already at the bottom
+    const lastMeasureRef = useRef({ height: 0, top: 0, atBottom: true });
+    const messageCountRef = useRef(messages.length);
+    // Reset measurement when the session changes so the initial render
+    // scrolls to bottom for the new session.
+    useEffect(() => {
+      lastMeasureRef.current = { height: 0, top: 0, atBottom: true };
+      messageCountRef.current = 0;
+    }, [session?.id]);
 
     useEffect(() => {
-      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      const el = scrollRef.current;
+      if (!el) return;
+      const prev = lastMeasureRef.current;
+      const prevCount = messageCountRef.current;
+      messageCountRef.current = messages.length;
+      const delta = messages.length - prevCount;
+      if (delta > 0 && el.scrollHeight > prev.height && !prev.atBottom && prev.height > 0) {
+        // Older messages prepended (loadMore) — keep the user's anchor.
+        el.scrollTop = prev.top + (el.scrollHeight - prev.height);
+      } else if (prev.atBottom || prev.height === 0) {
+        // Initial load OR user was already at the bottom: follow the latest.
+        el.scrollTop = el.scrollHeight;
+      }
+      lastMeasureRef.current = {
+        height: el.scrollHeight,
+        top: el.scrollTop,
+        atBottom: el.scrollHeight - el.scrollTop - el.clientHeight < 30,
+      };
     }, [messages.length, view]);
+
+    function onScroll() {
+      const el = scrollRef.current;
+      if (!el) return;
+      lastMeasureRef.current = {
+        height: el.scrollHeight,
+        top: el.scrollTop,
+        atBottom: el.scrollHeight - el.scrollTop - el.clientHeight < 30,
+      };
+      if (el.scrollTop < 80 && hasOlder && !loadingOlder && onLoadOlder) {
+        onLoadOlder();
+      }
+    }
 
     const visible = messages.filter((m) => !m.placeholder);
 
@@ -998,10 +1039,29 @@
         
 
         {/* Scrollable messages */}
-        <div ref={scrollRef} style={{
+        <div ref={scrollRef} onScroll={onScroll} style={{
           flex: 1, overflowY: 'auto',
           paddingTop: 16
         }}>
+          {loadingOlder && (
+            <div style={{
+              textAlign: 'center', padding: '6px 0 12px',
+              fontSize: 11, color: theme.textMuted,
+              fontFamily: variant.allMono ? variant.mono : 'inherit',
+            }}>
+              {variant.allMono ? 'loading older…' : 'Loading older messages…'}
+            </div>
+          )}
+          {!hasOlder && messages.length > 0 && view !== 'json' && view !== 'jsonl' && (
+            <div style={{
+              textAlign: 'center', padding: '4px 0 10px',
+              fontSize: 10, color: theme.textMuted,
+              fontFamily: variant.allMono ? variant.mono : 'inherit',
+              letterSpacing: variant.allMono ? 0 : '0.04em',
+            }}>
+              {variant.allMono ? '— start of transcript —' : 'Start of transcript'}
+            </div>
+          )}
           {renderBody()}
         </div>
       </div>);

@@ -350,7 +350,7 @@
 
   }
 
-  function InputBox({ onSend, onStop, onSteer, theme, variant, session, isStreaming }) {
+  function InputBox({ onSend, onStop, onSteer, onSwitchModel, theme, variant, session, isStreaming }) {
     const [text, setText] = useState('');
     const [provider, setProvider] = useState(session.provider);
     const [model, setModel] = useState(session.model);
@@ -447,7 +447,12 @@
 
               {/* Center: pickers */}
               <ModelPicker provider={provider} model={model} theme={theme} variant={variant}
-              onChange={(p, m) => {setProvider(p);setModel(m);}} />
+              onChange={(p, m) => {
+                setProvider(p); setModel(m);
+                if ((p !== session.provider || m !== session.model) && onSwitchModel) {
+                  onSwitchModel(p, m);
+                }
+              }} />
               <BudgetPicker value={budget} onChange={setBudget} theme={theme} variant={variant} />
               <Pill theme={theme} variant={variant} onClick={() => setText('/')}>
                 <window.Icons.Slash size={12} />

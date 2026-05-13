@@ -20,9 +20,10 @@ import './components/harness.jsx';
 
 import { hasToken } from './api/client.js';
 import { useHarnessData } from './api/use-harness-data.js';
+import { makeActions } from './api/actions.js';
 import { Login } from './login.jsx';
 
-const { useState } = React;
+const { useState, useMemo } = React;
 
 const TWEAK_DEFAULTS = {
   variant: 'Eclipse',
@@ -41,7 +42,41 @@ function App() {
   const Harness = window.Harness;
 
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
-  const { data, error } = useHarnessData();
+  const { data, error, refresh } = useHarnessData();
+
+  const harnessActions = useMemo(() => {
+    const api = makeActions({ refresh });
+    return {
+      onSend: (session, text) => api.sendMessage(session.clientName, session.sessionId, text),
+      // /message accepts any user-supplied content; "steer" is just a queued
+      // user message for an in-flight session.
+      onSteer: (session, text) => api.sendMessage(session.clientName, session.sessionId, text),
+      // Kill / Stop the running session by flipping enabled=false on the server.
+      onStop: (session) => api.setEnabled(session.clientName, session.sessionId, false),
+      onKill: (session) => api.setEnabled(session.clientName, session.sessionId, false),
+      onRevive: (session) => api.setEnabled(session.clientName, session.sessionId, true),
+      onArchiveSession: (session) => api.setEnabled(session.clientName, session.sessionId, false),
+      onDeleteSession: (session) => api.deleteSession(session.clientName, session.sessionId),
+      onRenameSession: (session, name) => api.rename(session.clientName, session.sessionId, name),
+      onSwitchModel: (session, provider, model) =>
+        api.switchSession(session.clientName, session.sessionId, { provider, model }),
+      onCreateSession: async (opts = {}) => {
+        const env = opts.env || (data?.environments?.find((e) => e.connected && e.enabled)?.id);
+        if (!env) throw new Error('No environment selected and none online');
+        const cwd = opts.cwd || '~';
+        const result = await api.createSession(env, {
+          workingDirectory: cwd,
+          provider: opts.provider,
+          model: opts.model,
+        });
+        const newSessionId = result?.sessionId || result?.id;
+        if (opts.text && newSessionId) {
+          await api.sendMessage(env, newSessionId, opts.text);
+        }
+        return { clientName: env, sessionId: newSessionId };
+      },
+    };
+  }, [refresh, data?.environments]);
 
   if (data == null) {
     return (
@@ -58,7 +93,7 @@ function App() {
 
   return (
     <>
-      <Harness tweaks={t} setTweak={setTweak} data={data} />
+      <Harness tweaks={t} setTweak={setTweak} data={data} actions={harnessActions} />
       <TweaksPanel>
         <TweakSection label="Appearance" />
         <TweakRadio

@@ -98,6 +98,7 @@ export function useHarnessData() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const aliveRef = useRef(true);
+  const loadRef = useRef(null);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -116,13 +117,19 @@ export function useHarnessData() {
         setData((prev) => prev ?? shape([]));
       }
     }
+    loadRef.current = load;
     load();
     timer = setInterval(load, REFRESH_MS);
     return () => {
       aliveRef.current = false;
+      loadRef.current = null;
       clearInterval(timer);
     };
   }, []);
 
-  return { data, error };
+  // Stable refresh handle that callers (actions.js) can poke after a mutation
+  // to skip the 10 s polling delay.
+  const refresh = () => { loadRef.current && loadRef.current(); };
+
+  return { data, error, refresh };
 }

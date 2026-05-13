@@ -105,7 +105,7 @@
     );
   }
 
-  function SessionRow({ session, active, onClick, theme, variant, density }) {
+  function SessionRow({ session, active, onClick, theme, variant, density, onArchive, onDelete }) {
     const compact = density === 'compact';
     const padY = compact ? 5 : 8;
 
@@ -181,8 +181,11 @@
         </div>
         {/* Row actions — only in comfy view */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 0, flexShrink: 0 }}>
-          <RowAction kind="archive" title="Archive" theme={theme} />
-          <RowAction kind="trash" title="Delete" theme={theme} danger />
+          <RowAction kind="archive" title="Archive" theme={theme} onClick={() => onArchive && onArchive(session)} />
+          <RowAction kind="trash" title="Delete" theme={theme} danger onClick={() => {
+            if (!onDelete) return;
+            if (window.confirm(`Delete "${session.title}"? This removes it from the server and the agent.`)) onDelete(session);
+          }} />
         </div>
       </div>
     );
@@ -358,7 +361,7 @@
     return <PickerPill label="sort" value={value} options={opts} onChange={onChange} theme={theme} variant={variant} hideLabel={hideLabel} />;
   }
 
-  function Sidebar({ sessions, activeId, onSelect, theme, variant, density, width, onNewSession }) {
+  function Sidebar({ sessions, activeId, onSelect, theme, variant, density, width, onNewSession, onArchiveSession, onDeleteSession }) {
     const [groupBy, setGroupBy] = useState('cwd');
     const [sortBy, setSortBy] = useState('latest');
     const [collapsed, setCollapsed] = useState({});
@@ -597,6 +600,8 @@
                     active={s.id === activeId}
                     onClick={() => onSelect(s.id)}
                     theme={theme} variant={variant} density={density}
+                    onArchive={onArchiveSession}
+                    onDelete={onDeleteSession}
                   />
                 ))}
               </div>

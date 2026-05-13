@@ -722,7 +722,7 @@
 
   }
 
-  function SessionTitleBar({ sessionTitle, theme, variant, view, onViewChange, onCopy, copied }) {
+  function SessionTitleBar({ sessionTitle, theme, variant, view, onViewChange, onCopy, copied, onRename, onArchive, onDelete }) {
     const [editing, setEditing] = useState(false);
     const [title, setTitle] = useState(sessionTitle);
     const inputRef = useRef(null);
@@ -735,7 +735,11 @@
       }
     }, [editing]);
 
-    function commit() {setEditing(false);}
+    function commit() {
+      const next = (title || '').trim();
+      if (next && next !== sessionTitle && onRename) onRename(next);
+      setEditing(false);
+    }
     function cancel() {setTitle(sessionTitle);setEditing(false);}
 
     return (
@@ -827,7 +831,8 @@
             <span style={{ width: 1, height: 18, background: theme.border, margin: '0 2px' }} />
 
             <button
-            title="Archive session"
+            title="Archive session (disables on server)"
+            onClick={() => onArchive && onArchive()}
             style={{
               background: 'transparent',
               border: `1px solid ${theme.border}`,
@@ -840,7 +845,7 @@
             }}
             onMouseEnter={(e) => {e.currentTarget.style.color = theme.text;e.currentTarget.style.borderColor = theme.borderStrong;}}
             onMouseLeave={(e) => {e.currentTarget.style.color = theme.textDim;e.currentTarget.style.borderColor = theme.border;}}>
-            
+
               <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="1.5" y="2.5" width="11" height="2.5" rx=".5" />
                 <path d="M2.5 5v6a.5.5 0 0 0 .5.5h8a.5.5 0 0 0 .5-.5V5" />
@@ -851,6 +856,10 @@
 
             <button
             title="Delete session"
+            onClick={() => {
+              if (!onDelete) return;
+              if (window.confirm('Delete this session? This removes it from the server and the agent.')) onDelete();
+            }}
             style={{
               background: 'transparent',
               border: `1px solid ${theme.border}`,
@@ -863,7 +872,7 @@
             }}
             onMouseEnter={(e) => {e.currentTarget.style.color = theme.status.failed;e.currentTarget.style.borderColor = `${theme.status.failed}55`;}}
             onMouseLeave={(e) => {e.currentTarget.style.color = theme.textDim;e.currentTarget.style.borderColor = theme.border;}}>
-            
+
               <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M2 4h10M5.5 4V2.5h3V4" />
                 <path d="M3.5 4v7a.5.5 0 0 0 .5.5h6a.5.5 0 0 0 .5-.5V4" />
@@ -896,7 +905,7 @@
 
   }
 
-  function ChatLog({ messages, theme, variant, bubble, density, sessionTitle, session }) {
+  function ChatLog({ messages, theme, variant, bubble, density, sessionTitle, session, onRename, onArchive, onDelete }) {
     const scrollRef = useRef(null);
     const [view, setView] = useState('transcript');
     const [copied, setCopied] = useState(false);
@@ -982,7 +991,10 @@
           sessionTitle={sessionTitle}
           theme={theme} variant={variant}
           view={view} onViewChange={setView}
-          onCopy={copyTranscript} copied={copied} />
+          onCopy={copyTranscript} copied={copied}
+          onRename={onRename}
+          onArchive={onArchive}
+          onDelete={onDelete} />
         
 
         {/* Scrollable messages */}

@@ -388,7 +388,7 @@
 
   }
 
-  function ChatScreen({ session, messages, theme, variant, tweaks, onSend, onStop, onSteer, isStreaming, onKill, onRevive, environments, gitRepos }) {
+  function ChatScreen({ session, messages, theme, variant, tweaks, onSend, onStop, onSteer, isStreaming, onKill, onRevive, environments, gitRepos, onRename, onArchive, onDelete, onSwitchModel }) {
     return (
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: theme.bg }}>
         <window.ChatLog
@@ -397,88 +397,140 @@
           bubble={tweaks.bubble}
           density={tweaks.density}
           sessionTitle={session.title}
-          session={session} />
-        
+          session={session}
+          onRename={onRename}
+          onArchive={onArchive}
+          onDelete={onDelete} />
+
         {/* Status bar — directly above input box */}
         <StatusBar session={session} theme={theme} variant={variant} isStreaming={isStreaming} onKill={onKill} onRevive={onRevive} environments={environments} gitRepos={gitRepos} />
         <window.InputBox
           onSend={onSend}
           onStop={onStop}
           onSteer={onSteer}
+          onSwitchModel={onSwitchModel}
           isStreaming={isStreaming}
           theme={theme} variant={variant}
           session={session} />
-        
+
       </main>);
 
   }
 
-  function Harness({ tweaks, setTweak, data }) {
+  function Harness({ tweaks, setTweak, data, actions }) {
     const variantName = tweaks.variant || 'Eclipse';
     const variant = window.HARNESS_THEMES[variantName] || window.HARNESS_THEMES.Eclipse;
     const theme = tweaks.dark ? variant.dark : variant.light;
 
     const [activeId, setActiveId] = useState(data.activeSessionId);
-    const [screen, setScreen] = useState('launcher'); // 'chat' | 'launcher' | 'settings'
+    const [screen, setScreen] = useState(data.sessions.length === 0 ? 'launcher' : 'launcher'); // 'chat' | 'launcher' | 'settings'
     const [localMessages, setLocalMessages] = useState({});
-    const [streaming, setStreaming] = useState(true);
+    const [streaming, setStreaming] = useState(false);
     const streamTimer = useRef(null);
 
     const session = data.sessions.find((s) => s.id === activeId) || data.sessions[0];
-    const baseMessages = data.chats[activeId] || [
+    const baseMessages = session && data.chats[session.id] || (session ? [
     { role: 'assistant', time: Date.now(), kind: 'text',
-      text: `Session "${session.title}" — ${session.msgs} messages. Full transcript not loaded for this design preview.` }];
+      text: `Session "${session.title}" — ${session.msgs} messages. Transcript loading is not wired yet; new messages you send are queued to the agent.` }] : []);
 
-    const extras = localMessages[activeId] || [];
+    const extras = session ? (localMessages[session.id] || []) : [];
     const messages = [...baseMessages, ...extras];
 
-    function handleSend(text) {
-      const t = Date.now();
-      const newMsgs = [
-      ...(localMessages[activeId] || []),
-      { role: 'user', time: t, kind: 'text', text },
-      { role: 'assistant', time: t + 1, kind: 'thinking', collapsed: false, summary: 'Considering the request', text: 'Looking at what you asked for, planning the right approach.' },
-      { role: 'assistant', time: t + 2, kind: 'text', text: 'On it.', streaming: true }];
+    function appendOptimistic(text, role = 'user') {
+      if (!session) return;
+      setLocalMessages((prev) => {
+        const cur = prev[session.id] || [];
+        return { ...prev, [session.id]: [...cur, { role, time: Date.now(), kind: 'text', text }] };
+      });
+    }
 
-      setLocalMessages({ ...localMessages, [activeId]: newMsgs });
+    function handleSend(text) {
+      if (!session || !text) return;
+      appendOptimistic(text, 'user');
       setStreaming(true);
       if (streamTimer.current) clearTimeout(streamTimer.current);
-      streamTimer.current = setTimeout(() => {
+      streamTimer.current = setTimeout(() => setStreaming(false), 8000);
+      Promise.resolve(actions?.onSend?.(session, text)).catch((err) => {
+        console.error('send failed', err);
+        appendOptimistic(`[send failed: ${err?.message || err}]`, 'assistant');
         setStreaming(false);
-        setLocalMessages((prev) => {
-          const cur = prev[activeId] || [];
-          return { ...prev, [activeId]: cur.map((m) => m.streaming ? { ...m, streaming: false, text: m.text + ' Done.' } : m) };
-        });
-      }, 4000);
+      });
     }
 
     function handleStop() {
       setStreaming(false);
       if (streamTimer.current) clearTimeout(streamTimer.current);
-      setLocalMessages((prev) => {
-        const cur = prev[activeId] || [];
-        return { ...prev, [activeId]: cur.map((m) => m.streaming ? { ...m, streaming: false, text: m.text + ' [stopped]' } : m) };
-      });
+      if (session) Promise.resolve(actions?.onStop?.(session)).catch((err) => console.error('stop failed', err));
     }
 
     function handleSteer(text) {
-      const cur = localMessages[activeId] || [];
-      const newMsgs = [
-      ...cur,
-      { role: 'user', time: Date.now(), kind: 'text', text: '↪ Steer: ' + text },
-      { role: 'assistant', time: Date.now() + 1, kind: 'text', text: 'Got it — redirecting.', streaming: true }];
+      if (!session || !text) return;
+      appendOptimistic('↪ Steer: ' + text, 'user');
+      Promise.resolve(actions?.onSteer?.(session, text)).catch((err) => console.error('steer failed', err));
+    }
 
-      setLocalMessages({ ...localMessages, [activeId]: newMsgs });
+    function handleKill() {
+      if (!session) return;
+      Promise.resolve(actions?.onKill?.(session)).catch((err) => console.error('kill failed', err));
+    }
+
+    function handleRevive() {
+      if (!session) return;
+      Promise.resolve(actions?.onRevive?.(session)).catch((err) => console.error('revive failed', err));
+    }
+
+    function handleRename(name) {
+      if (!session || !name) return;
+      Promise.resolve(actions?.onRenameSession?.(session, name)).catch((err) => console.error('rename failed', err));
+    }
+
+    function handleArchive() {
+      if (!session) return;
+      Promise.resolve(actions?.onArchiveSession?.(session)).catch((err) => console.error('archive failed', err));
+    }
+
+    function handleDelete() {
+      if (!session) return;
+      const sid = session.id;
+      Promise.resolve(actions?.onDeleteSession?.(session))
+        .then(() => {
+          // After delete, drop the optimistic msgs for the gone session and
+          // fall back to launcher.
+          setLocalMessages((prev) => { const { [sid]: _, ...rest } = prev; return rest; });
+          if (activeId === sid) { setActiveId(null); setScreen('launcher'); }
+        })
+        .catch((err) => console.error('delete failed', err));
+    }
+
+    function handleSwitchModel(provider, model) {
+      if (!session) return;
+      Promise.resolve(actions?.onSwitchModel?.(session, provider, model)).catch((err) => console.error('switch failed', err));
     }
 
     function handleNewSession() {setScreen('launcher');}
     function handleHome() {setScreen('launcher');}
     function handleCreateSession(opts) {
-      // If continuing an existing session, switch to it.
+      // If continuing an existing session, just switch to it.
       if (opts && opts.continueId) {
         setActiveId(opts.continueId);
+        setScreen('chat');
+        return;
       }
-      setScreen('chat');
+      if (!actions?.onCreateSession) {
+        setScreen('chat');
+        return;
+      }
+      Promise.resolve(actions.onCreateSession(opts))
+        .then((result) => {
+          if (result && result.sessionId && result.clientName) {
+            setActiveId(`${result.clientName}:${result.sessionId}`);
+          }
+          setScreen('chat');
+        })
+        .catch((err) => {
+          console.error('create session failed', err);
+          alert(`Could not create session: ${err?.message || err}`);
+        });
     }
 
     // Listen for the launcher's "open settings" intent
@@ -522,10 +574,18 @@
             theme={theme} variant={variant}
             density={tweaks.density}
             width={sidebarWidth}
-            onNewSession={handleNewSession} />
+            onNewSession={handleNewSession}
+            onArchiveSession={(s) => actions?.onArchiveSession?.(s)}
+            onDeleteSession={(s) => {
+              const result = actions?.onDeleteSession?.(s);
+              if (result && result.then) {
+                result.catch((err) => console.error('delete failed', err));
+              }
+              if (s && activeId === s.id) { setActiveId(null); setScreen('launcher'); }
+            }} />
 
           }
-          {screen === 'chat' &&
+          {screen === 'chat' && session &&
           <ChatScreen
             session={session}
             messages={messages}
@@ -534,8 +594,12 @@
             onSend={handleSend}
             onStop={handleStop}
             onSteer={handleSteer}
-            onKill={handleStop}
-            onRevive={() => { /* mock revive — in real app, reopen the session */ }}
+            onKill={handleKill}
+            onRevive={handleRevive}
+            onRename={handleRename}
+            onArchive={handleArchive}
+            onDelete={handleDelete}
+            onSwitchModel={handleSwitchModel}
             isStreaming={streaming}
             environments={data.environments}
             gitRepos={data.gitRepos} />

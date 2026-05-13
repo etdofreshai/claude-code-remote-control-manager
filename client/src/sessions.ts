@@ -311,16 +311,41 @@ async function startQuery(opts: {
   });
   ready.catch(() => {});
 
+  // q.enableRemoteControl(true) hangs forever for gateway-routed sessions:
+  // the claude binary's claude.ai bridge handshake (OAuth) never completes
+  // when ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN are set, so the binary
+  // never writes the matching control_response. Race the call against a
+  // short timeout and proceed without SDK-level remote control so the
+  // session is still usable for message passing.
+  // Open Anthropic issues: #28508, #33625, #35125.
+  const ENABLE_RC_TIMEOUT_MS = 3000;
   let enabled = false;
   const enable = async (reason: string) => {
     if (enabled) return;
     enabled = true;
+    const rcPromise: Promise<unknown> = q.enableRemoteControl(true);
+    rcPromise.catch(() => {}); // suppress late rejection after timeout
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<"timeout">((res) => {
+      timeoutHandle = setTimeout(() => res("timeout"), ENABLE_RC_TIMEOUT_MS);
+    });
     try {
-      await q.enableRemoteControl(true);
+      const outcome = await Promise.race([
+        rcPromise.then(() => "ok" as const),
+        timeoutPromise,
+      ]);
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       patch(opts.sessionId, { status: "running" });
       resolveReady();
-      console.log(`session ${opts.sessionId}: remote control enabled (${reason})`);
+      if (outcome === "timeout") {
+        console.warn(
+          `session ${opts.sessionId}: enableRemoteControl(${reason}) did not complete in ${ENABLE_RC_TIMEOUT_MS}ms — proceeding without SDK remote control (likely gateway-routed; Anthropic issues #28508/#33625/#35125)`,
+        );
+      } else {
+        console.log(`session ${opts.sessionId}: remote control enabled (${reason})`);
+      }
     } catch (err) {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       enabled = false;
       console.error(`session ${opts.sessionId}: enableRemoteControl failed (${reason})`, err);
       patch(opts.sessionId, { status: "errored" });

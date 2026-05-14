@@ -803,6 +803,26 @@
           </div>
         }
 
+        {session && session.runtime &&
+        <span
+          title={session.runtime === 'cli'
+            ? 'CLI runtime — supports /goal, output styles, /batch. Per-turn subprocess.'
+            : 'SDK runtime — live remote-control bridge to claude.ai. Long-lived in-process loop.'}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 3,
+            padding: '2px 6px',
+            borderRadius: variant.radiusSm,
+            border: `1px solid ${theme.border}`,
+            background: theme.surface2,
+            color: theme.textDim,
+            fontSize: 10, fontFamily: variant.mono,
+            textTransform: 'uppercase', letterSpacing: '0.05em',
+            marginLeft: 4, flexShrink: 0,
+          }}>
+          {session.runtime}
+        </span>
+        }
+
         <div style={{ flex: 1 }} />
 
         {!editing &&

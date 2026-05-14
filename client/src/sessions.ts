@@ -3,10 +3,13 @@ import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { load, save, type TrackedSession, type Effort } from "./state.js";
+import { load, save, type TrackedSession, type Effort, type Runtime } from "./state.js";
 import { readSessionTitle } from "./list.js";
 import { getProvider, resolveEndpoint } from "./providers.js";
 import { recordSdkMessage, backfillFromDisk } from "./transcripts.js";
+import { startCliRunner } from "./cli-runner.js";
+
+const DEFAULT_RUNTIME: Runtime = "cli";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (s: string) => UUID_RE.test(s);
@@ -21,7 +24,8 @@ interface RunningSession {
   push: (msg: any) => void;
   close: () => void;
   ready: Promise<void>;
-  query: any;
+  /** SDK Query handle; null for CLI-mode sessions (no live control surface). */
+  query: any | null;
 }
 
 const running = new Map<string, RunningSession>();
@@ -186,7 +190,7 @@ function buildEnvOverrides(opts: {
   return overrides;
 }
 
-async function startQuery(opts: {
+async function startQueryCli(opts: {
   sessionId: string;
   workingDirectory: string;
   resume: boolean;
@@ -195,11 +199,71 @@ async function startQuery(opts: {
   model?: string;
   effort: Effort;
   pushBootstrap: boolean;
+  noticeText?: string;
+}): Promise<RunningSession> {
+  const runner = startCliRunner({
+    sessionId: opts.sessionId,
+    workingDirectory: opts.workingDirectory,
+    resume: opts.resume,
+    name: opts.name,
+    provider: opts.provider,
+    model: opts.model,
+    effort: opts.effort,
+    onStatus: (status) => patch(opts.sessionId, { status }),
+    onLastMessageAt: (iso) => patch(opts.sessionId, { lastMessageAt: iso }),
+  });
+
+  if (opts.noticeText) {
+    runner.push({
+      type: "user",
+      message: { role: "user", content: opts.noticeText },
+      parent_tool_use_id: null,
+      isSynthetic: true,
+      timestamp: new Date().toISOString(),
+    });
+  } else if (!opts.resume && opts.pushBootstrap) {
+    runner.push(bootstrapMessage({
+      provider: opts.provider,
+      model: opts.model,
+      effort: opts.effort,
+    }));
+  }
+  if (opts.resume) {
+    backfillFromDisk(opts.sessionId, opts.workingDirectory);
+  }
+
+  patch(opts.sessionId, { status: "running" });
+  const rs: RunningSession = {
+    sessionId: runner.sessionId,
+    workingDirectory: runner.workingDirectory,
+    abort: runner.abort,
+    push: runner.push,
+    close: runner.close,
+    ready: runner.ready,
+    query: runner.query,
+  };
+  running.set(opts.sessionId, rs);
+  return rs;
+}
+
+async function startQuery(opts: {
+  sessionId: string;
+  workingDirectory: string;
+  resume: boolean;
+  name?: string;
+  provider: string;
+  model?: string;
+  effort: Effort;
+  runtime: Runtime;
+  pushBootstrap: boolean;
   /** Override the synthetic prefatory message text. If set, this is
    *  pushed as a synthetic user message even on resume — useful for
    *  in-band notices like model-switch announcements. */
   noticeText?: string;
 }): Promise<RunningSession> {
+  if (opts.runtime === "cli") {
+    return startQueryCli(opts);
+  }
   const { stream, push, close } = createMessageStream();
   const abort = new AbortController();
 
@@ -423,7 +487,7 @@ async function killSession(sessionId: string, opts: { graceful?: boolean } = {})
   const rs = running.get(sessionId);
   if (!rs) return;
   running.delete(sessionId);
-  if (opts.graceful) {
+  if (opts.graceful && rs.query) {
     try {
       await rs.query.enableRemoteControl(false);
     } catch (err) {
@@ -446,6 +510,7 @@ export interface StartOpts {
   provider?: string;
   model?: string;
   effort?: Effort;
+  runtime?: Runtime;
 }
 
 export async function startNew(opts: StartOpts): Promise<TrackedSession> {
@@ -453,6 +518,7 @@ export async function startNew(opts: StartOpts): Promise<TrackedSession> {
   const finalName = opts.name?.trim() || generateName();
   const provider = opts.provider?.trim() || DEFAULT_PROVIDER;
   const effort = (opts.effort ?? DEFAULT_EFFORT) as Effort;
+  const runtime: Runtime = opts.runtime ?? DEFAULT_RUNTIME;
   const entry: TrackedSession = {
     sessionId,
     workingDirectory: opts.workingDirectory,
@@ -460,6 +526,7 @@ export async function startNew(opts: StartOpts): Promise<TrackedSession> {
     provider,
     model: opts.model?.trim() || undefined,
     effort,
+    runtime,
     addedAt: new Date().toISOString(),
     status: "starting",
   };
@@ -472,6 +539,7 @@ export async function startNew(opts: StartOpts): Promise<TrackedSession> {
     provider,
     model: entry.model,
     effort,
+    runtime,
     pushBootstrap: true,
   })
     .then(async (rs) => {
@@ -499,6 +567,7 @@ export async function bindExisting(opts: BindOpts): Promise<TrackedSession> {
     opts.name?.trim() || readSessionTitle(workingDirectory, sessionId);
   const provider = opts.provider?.trim() || DEFAULT_PROVIDER;
   const effort = (opts.effort ?? DEFAULT_EFFORT) as Effort;
+  const runtime: Runtime = opts.runtime ?? DEFAULT_RUNTIME;
   const entry: TrackedSession = {
     sessionId,
     workingDirectory,
@@ -506,6 +575,7 @@ export async function bindExisting(opts: BindOpts): Promise<TrackedSession> {
     provider,
     model: opts.model?.trim() || undefined,
     effort,
+    runtime,
     addedAt: new Date().toISOString(),
     status: "starting",
   };
@@ -518,6 +588,7 @@ export async function bindExisting(opts: BindOpts): Promise<TrackedSession> {
     provider,
     model: entry.model,
     effort,
+    runtime,
     pushBootstrap: false,
   }).catch((err) => console.error(`bindExisting ${sessionId} failed`, err));
   return { ...entry };
@@ -574,6 +645,7 @@ export async function renameAny(
       provider: tracked.provider ?? DEFAULT_PROVIDER,
       model: tracked.model,
       effort: (tracked.effort ?? DEFAULT_EFFORT) as Effort,
+      runtime: tracked.runtime ?? DEFAULT_RUNTIME,
       pushBootstrap: false,
     }).catch((err) =>
       console.error(`renameAny ${sessionId}: restart failed`, err),
@@ -694,6 +766,7 @@ export async function switchSession(
     provider,
     model,
     effort,
+    runtime: entry.runtime ?? DEFAULT_RUNTIME,
     pushBootstrap: false,
     noticeText,
   }).catch((err) => console.error(`switchSession ${sessionId}: spawn failed`, err));
@@ -730,6 +803,7 @@ export async function setSessionEnabled(
     provider: entry.provider ?? DEFAULT_PROVIDER,
     model: entry.model,
     effort: (entry.effort ?? DEFAULT_EFFORT) as Effort,
+    runtime: entry.runtime ?? DEFAULT_RUNTIME,
     pushBootstrap: false,
   }).catch((err) =>
     console.error(`setSessionEnabled ${sessionId}: spawn failed`, err),
@@ -758,6 +832,7 @@ export async function refreshSession(
     provider: tracked.provider ?? DEFAULT_PROVIDER,
     model: tracked.model,
     effort: (tracked.effort ?? DEFAULT_EFFORT) as Effort,
+    runtime: tracked.runtime ?? DEFAULT_RUNTIME,
     pushBootstrap: false,
   }).catch((err) =>
     console.error(`refreshSession ${sessionId}: restart failed`, err),
@@ -790,9 +865,10 @@ export async function resumeAllTracked(): Promise<void> {
         provider: entry.provider ?? DEFAULT_PROVIDER,
         model: entry.model,
         effort: (entry.effort ?? DEFAULT_EFFORT) as Effort,
+        runtime: entry.runtime ?? DEFAULT_RUNTIME,
         pushBootstrap: false,
       }).catch((err) => console.error(`resume ${entry.sessionId} failed`, err));
-      console.log(`resumed remote-control session ${entry.sessionId}`);
+      console.log(`resumed ${entry.runtime ?? DEFAULT_RUNTIME} session ${entry.sessionId}`);
     } catch (err) {
       console.error(`failed to resume ${entry.sessionId}`, err);
     }

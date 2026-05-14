@@ -4,6 +4,8 @@ import os from "node:os";
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
+export type Runtime = "cli" | "sdk";
+
 export interface TrackedSession {
   sessionId: string;
   workingDirectory: string;
@@ -11,6 +13,8 @@ export interface TrackedSession {
   provider?: string;
   model?: string;
   effort?: Effort;
+  /** which agent loop drives this session. Undefined = legacy (sdk). */
+  runtime?: Runtime;
   /** false = tracked but not currently running; default true. */
   enabled?: boolean;
   addedAt: string;

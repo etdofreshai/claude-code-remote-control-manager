@@ -213,16 +213,24 @@ async function startQuery(opts: {
   // fire its init event before we can call enableRemoteControl(). Resumed
   // sessions (bind + reboot-time restore) init from existing transcript
   // state, so no synthetic message is needed.
+  // The SDK stream does NOT echo human input back (only assistant messages
+  // and tool_result user-messages flow through the for-await loop). So any
+  // user message we push has to be recorded here, or it never lands in the
+  // transcript. (Resumed sessions get their history from backfillFromDisk.)
   if (opts.noticeText) {
-    push({
+    const m = {
       type: "user",
       message: { role: "user", content: opts.noticeText },
       parent_tool_use_id: null,
       isSynthetic: true,
       timestamp: new Date().toISOString(),
-    });
+    };
+    push(m);
+    recordSdkMessage(opts.sessionId, m);
   } else if (!opts.resume && opts.pushBootstrap) {
-    push(bootstrapMessage({ provider: opts.provider, model: opts.model, effort: opts.effort }));
+    const m = bootstrapMessage({ provider: opts.provider, model: opts.model, effort: opts.effort });
+    push(m);
+    recordSdkMessage(opts.sessionId, m);
   }
 
   // Tool gate. AskUserQuestion runs unintercepted now — the picker renders
@@ -648,12 +656,16 @@ export async function sendMessage(
   }
   console.log(`sendMessage: pushing to session ${sessionId}`);
 
-  rs.push({
+  const userMsg = {
     type: "user",
     message: { role: "user", content: blocks },
     parent_tool_use_id: null,
     timestamp: new Date().toISOString(),
-  });
+  };
+  rs.push(userMsg);
+  // The SDK stream doesn't echo human input — record it so it shows in the
+  // transcript instead of only the assistant's reply.
+  recordSdkMessage(sessionId, userMsg);
   patch(sessionId, { lastMessageAt: new Date().toISOString() });
   return respawned ? { sent: true, respawned: true } : { sent: true };
 }

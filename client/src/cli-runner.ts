@@ -102,6 +102,7 @@ export function startCliRunner(opts: CliRunnerOpts): CliRunningSession {
     if (!text || !text.trim()) {
       // Synthetic bootstrap messages have no useful CLI representation —
       // just record them so the transcript reflects intent and skip.
+      console.log(`cli session ${opts.sessionId}: skipping empty/synthetic turn`);
       try { recordSdkMessage(opts.sessionId, msg); } catch {}
       resolve();
       return;
@@ -123,11 +124,22 @@ export function startCliRunner(opts: CliRunnerOpts): CliRunningSession {
     args.push("--", text);
 
     const env = buildCliEnv({ provider: opts.provider, model: opts.model });
-    const child = spawn("claude", args, {
-      cwd: opts.workingDirectory,
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    console.log(
+      `cli session ${opts.sessionId}: spawning claude (${firstTurn ? "new" : "resume"}) cwd=${opts.workingDirectory} textLen=${text.length}`,
+    );
+    let child: ChildProcessByStdio<null, Readable, Readable>;
+    try {
+      child = spawn("claude", args, {
+        cwd: opts.workingDirectory,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (err) {
+      console.error(`cli session ${opts.sessionId}: spawn threw`, err);
+      opts.onStatus?.("errored");
+      resolve();
+      return;
+    }
     active = child;
     firstTurn = false;
 
@@ -172,6 +184,8 @@ export function startCliRunner(opts: CliRunnerOpts): CliRunningSession {
         console.error(
           `cli session ${opts.sessionId}: claude exited ${code}; stderr=${stderrBuf.slice(0, 500)}`,
         );
+      } else {
+        console.log(`cli session ${opts.sessionId}: claude turn complete (code ${code})`);
       }
       resolve();
     });

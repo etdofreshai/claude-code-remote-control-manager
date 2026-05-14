@@ -693,7 +693,13 @@ export async function sendMessage(
 ): Promise<{ sent: boolean; reason?: string }> {
   if (!isUuid(sessionId)) throw new Error(`invalid session id: ${sessionId}`);
   const rs = running.get(sessionId);
-  if (!rs) return { sent: false, reason: "session not running" };
+  if (!rs) {
+    console.log(
+      `sendMessage: session ${sessionId} not in running map (running=${running.size})`,
+    );
+    return { sent: false, reason: "session not running" };
+  }
+  console.log(`sendMessage: pushing to session ${sessionId}`);
 
   const blocks: SendContentBlock[] =
     typeof content === "string" ? [{ type: "text", text: content }] : content;

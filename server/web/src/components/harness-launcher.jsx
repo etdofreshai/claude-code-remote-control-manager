@@ -109,12 +109,16 @@
   // Bind-mode session table — lists *untracked* on-disk sessions for the
   // selected environment + directory (fetched via the `list` agent command),
   // each with a Bind button that adopts it via the real bindSession API.
-  function BindSessionTable({ env, cwd, onListSessions, trackedIds, selectedId, onSelect, onBind, theme, variant }) {
+  // Paginated client-side so a long list doesn't run off the screen.
+  function BindSessionTable({ env, cwd, onListSessions, trackedIds, onBind, theme, variant }) {
+    const PAGE_SIZE = 8;
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [page, setPage] = useState(0);
 
     useEffect(() => {
+      setPage(0);
       if (!env || !cwd || !onListSessions) { setItems([]); setError(null); return; }
       let cancelled = false;
       setLoading(true);
@@ -156,7 +160,28 @@
       return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
         + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
-    const COLS = '16px 1fr 116px 72px';
+    const COLS = '1fr 116px 72px';
+    const pageCount = Math.ceil(items.length / PAGE_SIZE);
+    const safePage = Math.min(page, pageCount - 1);
+    const start = safePage * PAGE_SIZE;
+    const pageItems = items.slice(start, start + PAGE_SIZE);
+
+    const pageBtn = (label, onClick, disabled) => (
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        style={{
+          background: 'transparent', border: `1px solid ${theme.border}`,
+          borderRadius: variant.radiusSm,
+          color: disabled ? theme.textMuted : theme.textDim,
+          padding: '3px 9px', fontSize: 11,
+          cursor: disabled ? 'default' : 'pointer',
+          fontFamily: variant.allMono ? variant.mono : 'inherit',
+        }}
+        onMouseEnter={(e) => { if (!disabled) { e.currentTarget.style.color = theme.text; e.currentTarget.style.borderColor = theme.borderStrong; } }}
+        onMouseLeave={(e) => { if (!disabled) { e.currentTarget.style.color = theme.textDim; e.currentTarget.style.borderColor = theme.border; } }}
+      >{label}</button>
+    );
 
     return (
       <div style={{ border: `1px solid ${theme.border}`, borderRadius: variant.radius, overflow: 'hidden', background: theme.surface }}>
@@ -168,70 +193,70 @@
           textTransform: variant.allMono ? 'none' : 'uppercase',
           letterSpacing: variant.allMono ? 0 : '0.06em', fontWeight: 600,
         }}>
-          <span></span>
           <span>Session</span>
           <span>Last activity</span>
           <span></span>
         </div>
-        {items.map((s, i) => {
-          const active = s.sessionId === selectedId;
-          return (
-            <div
-              key={s.sessionId}
-              onClick={() => onSelect(active ? null : s.sessionId)}
-              style={{
-                display: 'grid', gridTemplateColumns: COLS, columnGap: 12, padding: '10px 14px',
-                borderTop: i === 0 ? 'none' : `1px solid ${theme.border}`,
-                background: active ? theme.accentSoft : 'transparent',
-                cursor: 'pointer', alignItems: 'center', transition: 'background .1s',
-              }}
-              onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = theme.surfaceHover; }}
-              onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
-            >
-              <span style={{
-                width: 12, height: 12, borderRadius: '50%', flexShrink: 0,
-                border: `1.5px solid ${active ? theme.accent : theme.borderStrong}`,
-                background: active ? theme.accent : 'transparent',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                {active && <span style={{ width: 5, height: 5, borderRadius: '50%', background: theme.accentText }} />}
-              </span>
-              <div style={{ minWidth: 0 }}>
-                <div style={{
-                  fontSize: 12.5, color: theme.text, fontWeight: active ? 500 : 400,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  letterSpacing: variant.letterSpacing,
-                }}>{s.title || s.sessionId}</div>
-                <div style={{
-                  fontSize: 10, color: theme.textMuted, fontFamily: variant.mono, marginTop: 2,
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>{s.lastText || s.sessionId}</div>
-              </div>
-              <div style={{ fontSize: 10.5, color: theme.textDim, fontFamily: variant.mono }}>
-                {fmtTime(s.lastMessageAt)}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onBind(s); }}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    background: active ? theme.accent : 'transparent',
-                    color: active ? theme.accentText : theme.textDim,
-                    border: `1px solid ${active ? theme.accent : theme.border}`,
-                    borderRadius: variant.radiusSm, padding: '3px 9px',
-                    fontSize: 11, cursor: 'pointer',
-                    fontFamily: variant.allMono ? variant.mono : 'inherit',
-                  }}
-                  onMouseEnter={(e) => { if (!active) { e.currentTarget.style.background = theme.accentSoft; e.currentTarget.style.color = theme.accent; e.currentTarget.style.borderColor = theme.accentLine; } }}
-                  onMouseLeave={(e) => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = theme.textDim; e.currentTarget.style.borderColor = theme.border; } }}
-                >
-                  <BindIcon size={10} />
-                  {variant.allMono ? 'bind' : 'Bind'}
-                </button>
-              </div>
+        {pageItems.map((s, i) => (
+          <div
+            key={s.sessionId}
+            style={{
+              display: 'grid', gridTemplateColumns: COLS, columnGap: 12, padding: '10px 14px',
+              borderTop: i === 0 ? 'none' : `1px solid ${theme.border}`,
+              alignItems: 'center', transition: 'background .1s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = theme.surfaceHover; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div style={{
+                fontSize: 12.5, color: theme.text,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                letterSpacing: variant.letterSpacing,
+              }}>{s.title || s.sessionId}</div>
+              <div style={{
+                fontSize: 10, color: theme.textMuted, fontFamily: variant.mono, marginTop: 2,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>{s.lastText || s.sessionId}</div>
             </div>
-          );
-        })}
+            <div style={{ fontSize: 10.5, color: theme.textDim, fontFamily: variant.mono }}>
+              {fmtTime(s.lastMessageAt)}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => onBind(s)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  background: 'transparent', color: theme.textDim,
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: variant.radiusSm, padding: '3px 9px',
+                  fontSize: 11, cursor: 'pointer',
+                  fontFamily: variant.allMono ? variant.mono : 'inherit',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = theme.accentSoft; e.currentTarget.style.color = theme.accent; e.currentTarget.style.borderColor = theme.accentLine; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = theme.textDim; e.currentTarget.style.borderColor = theme.border; }}
+              >
+                <BindIcon size={10} />
+                {variant.allMono ? 'bind' : 'Bind'}
+              </button>
+            </div>
+          </div>
+        ))}
+        {pageCount > 1 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '7px 14px', borderTop: `1px solid ${theme.border}`,
+            background: theme.surface2,
+          }}>
+            <span style={{ fontSize: 10.5, color: theme.textMuted, fontFamily: variant.mono }}>
+              {start + 1}–{start + pageItems.length} of {items.length}
+            </span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {pageBtn(variant.allMono ? 'prev' : 'Prev', () => setPage((p) => Math.max(0, p - 1)), safePage <= 0)}
+              {pageBtn(variant.allMono ? 'next' : 'Next', () => setPage((p) => Math.min(pageCount - 1, p + 1)), safePage >= pageCount - 1)}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -282,7 +307,6 @@
     const [cwd, setCwd] = useState('~/code/web-app');
     const [branch, setBranch] = useState('main');
     const [env, setEnv] = useState('local');
-    const [bindTargetId, setBindTargetId] = useState(null);
     const taRef = useRef(null);
 
     const environments = data.environments || [];
@@ -655,7 +679,7 @@
                           <DropdownItem
                             key={e.id}
                             active={e.id === env}
-                            onClick={() => { if (!offline) { setEnv(e.id); setBindTargetId(null); close(); } }}
+                            onClick={() => { if (!offline) { setEnv(e.id); close(); } }}
                             theme={theme} variant={variant}
                             icon={<span style={{
                               width: 7, height: 7, borderRadius: '50%',
@@ -693,7 +717,7 @@
                         <DropdownItem
                           key={c}
                           active={c === cwd}
-                          onClick={() => { setCwd(c); setBindTargetId(null); close(); }}
+                          onClick={() => { setCwd(c); close(); }}
                           theme={theme} variant={variant}
                           icon={<window.Icons.Folder size={11} />}
                           label={
@@ -713,8 +737,6 @@
                 cwd={cwd}
                 onListSessions={onListSessions}
                 trackedIds={trackedIds}
-                selectedId={bindTargetId}
-                onSelect={setBindTargetId}
                 onBind={(s) => onBind && onBind({ env, cwd, sessionId: s.sessionId })}
                 theme={theme} variant={variant}
               />

@@ -47,7 +47,6 @@ interface TrackedSession {
   provider?: string;
   model?: string;
   effort?: string;
-  runtime?: "cli" | "sdk";
   enabled?: boolean;
   addedAt: string;
   lastMessageAt?: string;
@@ -164,7 +163,6 @@ interface AgentCommand {
     provider?: string;
     model?: string;
     effort?: string;
-    runtime?: "cli" | "sdk";
     enabled?: boolean;
     content?: unknown;
     page?: number;
@@ -411,14 +409,12 @@ app.post("/api/clients/:name/sessions/new", async (req) => {
     provider,
     model,
     effort,
-    runtime,
   } = req.body as {
     workingDirectory: string;
     name?: string;
     provider?: string;
     model?: string;
     effort?: string;
-    runtime?: "cli" | "sdk";
   };
   if (!workingDirectory) throw new Error("workingDirectory required");
   const cmd: AgentCommand = {
@@ -430,7 +426,6 @@ app.post("/api/clients/:name/sessions/new", async (req) => {
       provider,
       model,
       effort,
-      runtime: runtime ?? "cli",
     },
   };
   return enqueue(name, cmd);

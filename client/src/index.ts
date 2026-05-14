@@ -113,7 +113,6 @@ async function pollOnce(): Promise<void> {
       provider?: string;
       model?: string;
       effort?: Effort;
-      runtime?: "cli" | "sdk";
       enabled?: boolean;
       content?: SendContentBlock[] | string;
       page?: number;
@@ -132,7 +131,6 @@ async function pollOnce(): Promise<void> {
         provider: cmd.payload.provider,
         model: cmd.payload.model,
         effort: cmd.payload.effort,
-        runtime: cmd.payload.runtime,
       });
     } else if (cmd.type === "bind") {
       if (!cmd.payload.sessionId || !cmd.payload.workingDirectory)
@@ -144,7 +142,6 @@ async function pollOnce(): Promise<void> {
         provider: cmd.payload.provider,
         model: cmd.payload.model,
         effort: cmd.payload.effort,
-        runtime: cmd.payload.runtime,
       });
     } else if (cmd.type === "remove") {
       if (!cmd.payload.sessionId) throw new Error("sessionId required for remove");

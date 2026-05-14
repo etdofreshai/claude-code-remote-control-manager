@@ -63,10 +63,10 @@ export function makeActions({ refresh } = {}) {
       ));
     },
 
-    createSession(clientName, { workingDirectory, name, provider, model, effort, runtime }) {
+    createSession(clientName, { workingDirectory, name, provider, model, effort }) {
       return after(apiFetch(
         `/api/clients/${encodeURIComponent(clientName)}/sessions/new`,
-        { method: 'POST', body: { workingDirectory, name, provider, model, effort, runtime } },
+        { method: 'POST', body: { workingDirectory, name, provider, model, effort } },
       ));
     },
 

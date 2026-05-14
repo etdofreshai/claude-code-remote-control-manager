@@ -138,7 +138,6 @@
     const [text, setText] = useState('');
     const [provider, setProvider] = useState('claude');
     const [model, setModel] = useState('sonnet');
-    const [runtime, setRuntime] = useState('cli');
     const [cwd, setCwd] = useState('~/code/web-app');
     const [branch, setBranch] = useState('main');
     const [env, setEnv] = useState('local');
@@ -180,7 +179,7 @@
 
     function fire() {
       if (!text.trim()) return;
-      onCreate && onCreate({ mode, text, provider, model, runtime,
+      onCreate && onCreate({ mode, text, provider, model,
         cwd: mode === 'code' ? cwd : null,
         branch: mode === 'code' ? branch : null,
         env: mode === 'code' ? env : null });
@@ -301,38 +300,6 @@
                     />
                   ));
                 }}
-              </Dropdown>
-
-              {/* Runtime — CLI vs SDK. CLI gets /goal, output styles, /batch;
-                  SDK keeps the live remote-control bridge to claude.ai. */}
-              <Dropdown
-                theme={theme} variant={variant} width={260}
-                trigger={(open) => (
-                  <PillTrigger
-                    icon={<window.Icons.Wrench size={11} />}
-                    value={runtime}
-                    open={open} theme={theme} variant={variant}
-                  />
-                )}
-              >
-                {({ close }) => (
-                  <>
-                    <DropdownItem
-                      active={runtime === 'cli'}
-                      onClick={() => { setRuntime('cli'); close(); }}
-                      theme={theme} variant={variant}
-                      icon={<window.Icons.Wrench size={11} />}
-                      label={<span>cli <span style={{ color: theme.textMuted, marginLeft: 6, fontSize: 10.5 }}>/goal · styles · /batch</span></span>}
-                    />
-                    <DropdownItem
-                      active={runtime === 'sdk'}
-                      onClick={() => { setRuntime('sdk'); close(); }}
-                      theme={theme} variant={variant}
-                      icon={<window.Icons.Sparkle size={11} />}
-                      label={<span>sdk <span style={{ color: theme.textMuted, marginLeft: 6, fontSize: 10.5 }}>live remote-control bridge</span></span>}
-                    />
-                  </>
-                )}
               </Dropdown>
 
               {/* Environment — only in code mode, between model and cwd */}

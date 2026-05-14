@@ -51,6 +51,142 @@
     return out;
   }
 
+  // ── Minimal markdown renderer ──────────────────────────────────────────
+  // Inline: **bold**, *italic*, `code`, [text](url). Block: fenced code,
+  // #/##/… headers, -/* bullet lists, 1. ordered lists, paragraphs (single
+  // newlines kept as <br>). Produces React nodes — no dangerouslySetInnerHTML.
+  function mdInline(text, theme, variant, kp) {
+    const specs = [
+      { kind: 'code', re: /`([^`]+)`/g },
+      { kind: 'bold', re: /\*\*([^*\n]+?)\*\*/g },
+      { kind: 'link', re: /\[([^\]]+)\]\(([^)\s]+)\)/g },
+      { kind: 'italic', re: /\*(\S(?:[^*\n]*?\S)?)\*/g },
+    ];
+    const hits = [];
+    for (const { kind, re } of specs) {
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        hits.push({ start: m.index, end: m.index + m[0].length, kind, g1: m[1], g2: m[2] });
+      }
+    }
+    // Earliest first; on a tie prefer the longer match (so ** beats *).
+    hits.sort((a, b) => a.start - b.start || b.end - a.end);
+    const clean = [];
+    let lastEnd = 0;
+    for (const h of hits) { if (h.start >= lastEnd) { clean.push(h); lastEnd = h.end; } }
+    const out = [];
+    let i = 0;
+    clean.forEach((h, idx) => {
+      if (h.start > i) out.push(text.slice(i, h.start));
+      const key = `${kp}-${idx}`;
+      if (h.kind === 'code') {
+        out.push(<code key={key} style={{
+          fontFamily: variant.mono, fontSize: '0.92em',
+          background: theme.surface2, border: `1px solid ${theme.border}`,
+          borderRadius: 3, padding: '0 4px',
+        }}>{h.g1}</code>);
+      } else if (h.kind === 'bold') {
+        out.push(<strong key={key} style={{ fontWeight: 600 }}>{h.g1}</strong>);
+      } else if (h.kind === 'italic') {
+        out.push(<em key={key}>{h.g1}</em>);
+      } else if (h.kind === 'link') {
+        const safe = /^(https?:|mailto:)/i.test(h.g2) ? h.g2 : null;
+        out.push(safe
+          ? <a key={key} href={safe} target="_blank" rel="noopener noreferrer" style={{ color: theme.accent }}>{h.g1}</a>
+          : <span key={key}>{h.g1}</span>);
+      }
+      i = h.end;
+    });
+    if (i < text.length) out.push(text.slice(i));
+    return out;
+  }
+
+  function MarkdownText({ text, theme, variant }) {
+    const lines = String(text == null ? '' : text).split('\n');
+    const blocks = [];
+    let i = 0;
+    let k = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      // fenced code block
+      if (/^\s*```/.test(line)) {
+        const code = [];
+        i++;
+        while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { code.push(lines[i]); i++; }
+        i++; // skip closing fence
+        blocks.push(
+          <pre key={k++} style={{
+            margin: '6px 0', padding: '8px 10px',
+            background: theme.surface2, border: `1px solid ${theme.border}`,
+            borderRadius: variant.radiusSm, fontFamily: variant.mono, fontSize: 11.5,
+            color: theme.text, lineHeight: 1.55, overflow: 'auto', whiteSpace: 'pre',
+          }}><code>{code.join('\n')}</code></pre>
+        );
+        continue;
+      }
+      // header
+      const hd = line.match(/^(#{1,6})\s+(.*)$/);
+      if (hd) {
+        const sizes = { 1: 17, 2: 15.5, 3: 14, 4: 13, 5: 12.5, 6: 12 };
+        const myk = k++;
+        blocks.push(
+          <div key={myk} style={{
+            fontSize: sizes[hd[1].length] || 13, fontWeight: 600,
+            color: theme.text, margin: '10px 0 3px',
+          }}>{mdInline(hd[2], theme, variant, 'h' + myk)}</div>
+        );
+        i++;
+        continue;
+      }
+      // bullet / ordered list — consume consecutive list lines
+      if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
+        const ordered = /^\s*\d+\.\s+/.test(line);
+        const items = [];
+        while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) {
+          items.push(lines[i].replace(/^\s*([-*]|\d+\.)\s+/, ''));
+          i++;
+        }
+        const Tag = ordered ? 'ol' : 'ul';
+        const myk = k++;
+        blocks.push(
+          <Tag key={myk} style={{ margin: '4px 0', paddingLeft: 20 }}>
+            {items.map((it, idx) => (
+              <li key={idx} style={{ margin: '2px 0', lineHeight: 1.6 }}>
+                {mdInline(it, theme, variant, 'l' + myk + '-' + idx)}
+              </li>
+            ))}
+          </Tag>
+        );
+        continue;
+      }
+      // blank line — skip
+      if (line.trim() === '') { i++; continue; }
+      // paragraph — consecutive non-blank, non-special lines; \n kept as <br>
+      const para = [];
+      while (
+        i < lines.length && lines[i].trim() !== '' &&
+        !/^\s*```/.test(lines[i]) &&
+        !/^#{1,6}\s+/.test(lines[i]) &&
+        !/^\s*([-*]|\d+\.)\s+/.test(lines[i])
+      ) {
+        para.push(lines[i]);
+        i++;
+      }
+      const myk = k++;
+      blocks.push(
+        <div key={myk} style={{ margin: '4px 0', lineHeight: 1.6 }}>
+          {para.map((pl, idx) => (
+            <React.Fragment key={idx}>
+              {idx > 0 ? <br /> : null}
+              {mdInline(pl, theme, variant, 'p' + myk + '-' + idx)}
+            </React.Fragment>
+          ))}
+        </div>
+      );
+    }
+    return <>{blocks}</>;
+  }
+
   function DiffBlock({ diff, theme, variant, path }) {
     const colors = {
       add: { bg: 'rgba(74,222,128,0.08)', fg: '#7ee2a8', sign: '+' },
@@ -252,10 +388,10 @@
         <div style={{
           fontSize: 12, color: theme.textDim, lineHeight: 1.6,
           fontStyle: variant.allMono ? 'normal' : 'italic',
-          marginTop: 4, whiteSpace: 'pre-wrap',
+          marginTop: 4, whiteSpace: 'normal',
           fontFamily: variant.allMono ? variant.mono : 'inherit'
         }}>
-            {msg.text}
+            <MarkdownText text={msg.text} theme={theme} variant={variant} />
           </div>
         }
       </div>);
@@ -585,11 +721,11 @@
         {showHeader && <MessageHeader msg={msg} theme={theme} variant={variant} session={session} />}
         <div style={{
         fontSize: 13, color: theme.text, lineHeight: 1.6,
-        whiteSpace: 'pre-wrap',
+        whiteSpace: 'normal',
         fontFamily: variant.allMono ? variant.mono : 'inherit',
         letterSpacing: variant.letterSpacing
       }}>
-          {msg.text}
+          <MarkdownText text={msg.text} theme={theme} variant={variant} />
           {msg.streaming && <span style={{
           display: 'inline-block', width: 7, height: 13, marginLeft: 2,
           background: theme.accent, verticalAlign: 'text-bottom',

@@ -96,9 +96,150 @@
     );
   }
 
+  // Bind glyph — two interlocking chain links.
+  function BindIcon({ size = 11 }) {
+    return (
+      <svg width={size} height={size} viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5.5 8.5a3 3 0 0 0 4.243 0l1.414-1.414a3 3 0 0 0-4.243-4.243L5.5 4.257" />
+        <path d="M8.5 5.5a3 3 0 0 0-4.243 0L2.843 6.914a3 3 0 0 0 4.243 4.243L8.5 9.743" />
+      </svg>
+    );
+  }
+
+  // Bind-mode session table — lists *untracked* on-disk sessions for the
+  // selected environment + directory (fetched via the `list` agent command),
+  // each with a Bind button that adopts it via the real bindSession API.
+  function BindSessionTable({ env, cwd, onListSessions, trackedIds, selectedId, onSelect, onBind, theme, variant }) {
+    const [items, setItems] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+      if (!env || !cwd || !onListSessions) { setItems([]); setError(null); return; }
+      let cancelled = false;
+      setLoading(true);
+      setError(null);
+      Promise.resolve(onListSessions(env, cwd))
+        .then((list) => {
+          if (cancelled) return;
+          setItems((list || []).filter((it) => !trackedIds.has(it.sessionId)));
+        })
+        .catch((err) => { if (!cancelled) setError(err); })
+        .finally(() => { if (!cancelled) setLoading(false); });
+      return () => { cancelled = true; };
+      // onListSessions is identity-unstable across renders; env+cwd drive refetch.
+    }, [env, cwd]);
+
+    const note = (txt) => (
+      <div style={{
+        padding: '32px 0', textAlign: 'center', color: theme.textMuted,
+        fontSize: 12, fontFamily: variant.allMono ? variant.mono : 'inherit',
+      }}>{txt}</div>
+    );
+    if (!env || !cwd) {
+      return note(variant.allMono
+        ? '# pick an environment + directory above'
+        : 'Pick an environment and directory above to list sessions');
+    }
+    if (loading) return note(variant.allMono ? '# loading…' : 'Loading sessions…');
+    if (error) return note(`Could not list sessions: ${error && error.message ? error.message : error}`);
+    if (items.length === 0) {
+      return note(variant.allMono
+        ? '# no untracked sessions here'
+        : 'No untracked sessions found in this directory');
+    }
+
+    const fmtTime = (iso) => {
+      const t = Date.parse(iso);
+      if (!t) return '—';
+      const d = new Date(t);
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+        + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+    const COLS = '16px 1fr 116px 72px';
+
+    return (
+      <div style={{ border: `1px solid ${theme.border}`, borderRadius: variant.radius, overflow: 'hidden', background: theme.surface }}>
+        <div style={{
+          display: 'grid', gridTemplateColumns: COLS, columnGap: 12, padding: '7px 14px',
+          borderBottom: `1px solid ${theme.border}`, background: theme.surface2,
+          fontSize: 10, color: theme.textMuted, alignItems: 'center',
+          fontFamily: variant.allMono ? variant.mono : 'inherit',
+          textTransform: variant.allMono ? 'none' : 'uppercase',
+          letterSpacing: variant.allMono ? 0 : '0.06em', fontWeight: 600,
+        }}>
+          <span></span>
+          <span>Session</span>
+          <span>Last activity</span>
+          <span></span>
+        </div>
+        {items.map((s, i) => {
+          const active = s.sessionId === selectedId;
+          return (
+            <div
+              key={s.sessionId}
+              onClick={() => onSelect(active ? null : s.sessionId)}
+              style={{
+                display: 'grid', gridTemplateColumns: COLS, columnGap: 12, padding: '10px 14px',
+                borderTop: i === 0 ? 'none' : `1px solid ${theme.border}`,
+                background: active ? theme.accentSoft : 'transparent',
+                cursor: 'pointer', alignItems: 'center', transition: 'background .1s',
+              }}
+              onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = theme.surfaceHover; }}
+              onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <span style={{
+                width: 12, height: 12, borderRadius: '50%', flexShrink: 0,
+                border: `1.5px solid ${active ? theme.accent : theme.borderStrong}`,
+                background: active ? theme.accent : 'transparent',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {active && <span style={{ width: 5, height: 5, borderRadius: '50%', background: theme.accentText }} />}
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{
+                  fontSize: 12.5, color: theme.text, fontWeight: active ? 500 : 400,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  letterSpacing: variant.letterSpacing,
+                }}>{s.title || s.sessionId}</div>
+                <div style={{
+                  fontSize: 10, color: theme.textMuted, fontFamily: variant.mono, marginTop: 2,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>{s.lastText || s.sessionId}</div>
+              </div>
+              <div style={{ fontSize: 10.5, color: theme.textDim, fontFamily: variant.mono }}>
+                {fmtTime(s.lastMessageAt)}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onBind(s); }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    background: active ? theme.accent : 'transparent',
+                    color: active ? theme.accentText : theme.textDim,
+                    border: `1px solid ${active ? theme.accent : theme.border}`,
+                    borderRadius: variant.radiusSm, padding: '3px 9px',
+                    fontSize: 11, cursor: 'pointer',
+                    fontFamily: variant.allMono ? variant.mono : 'inherit',
+                  }}
+                  onMouseEnter={(e) => { if (!active) { e.currentTarget.style.background = theme.accentSoft; e.currentTarget.style.color = theme.accent; e.currentTarget.style.borderColor = theme.accentLine; } }}
+                  onMouseLeave={(e) => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = theme.textDim; e.currentTarget.style.borderColor = theme.border; } }}
+                >
+                  <BindIcon size={10} />
+                  {variant.allMono ? 'bind' : 'Bind'}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   function ModeToggle({ value, onChange, theme, variant }) {
     const opts = [
       { id: 'code', label: variant.allMono ? 'code' : 'Code', icon: <window.Icons.Wrench size={11} /> },
+      { id: 'bind', label: variant.allMono ? 'bind' : 'Bind', icon: <BindIcon size={11} /> },
       { id: 'chat', label: variant.allMono ? 'chat' : 'Chat', icon: <window.Icons.Sparkle size={11} /> },
     ];
     return (
@@ -133,7 +274,7 @@
     );
   }
 
-  function LauncherView({ data, theme, variant, tweaks, setTweak, onCreate, onCancel, hasActiveSession }) {
+  function LauncherView({ data, theme, variant, tweaks, setTweak, onCreate, onListSessions, onBind, onCancel, hasActiveSession }) {
     const [mode, setMode] = useState('code');
     const [text, setText] = useState('');
     const [provider, setProvider] = useState('claude');
@@ -141,6 +282,7 @@
     const [cwd, setCwd] = useState('~/code/web-app');
     const [branch, setBranch] = useState('main');
     const [env, setEnv] = useState('local');
+    const [bindTargetId, setBindTargetId] = useState(null);
     const taRef = useRef(null);
 
     const environments = data.environments || [];
@@ -163,6 +305,13 @@
       data.sessions.filter(s => s.cwd && s.cwd !== 'Chats').map(s => s.cwd)
     )), [data.sessions]);
 
+    // Sessions already tracked on the selected environment — Bind mode hides
+    // these so it only offers *untracked* on-disk sessions to adopt.
+    const trackedIds = useMemo(
+      () => new Set(data.sessions.filter(s => s.clientName === env).map(s => s.sessionId)),
+      [data.sessions, env],
+    );
+
     // Mock branches per cwd
     const branches = useMemo(() => {
       const all = data.sessions.filter(s => s.cwd === cwd && s.branch).map(s => s.branch);
@@ -170,12 +319,12 @@
     }, [cwd, data.sessions]);
 
     useEffect(() => {
-      if (taRef.current) {
+      if (taRef.current && mode !== 'bind') {
         taRef.current.style.height = 'auto';
         taRef.current.style.height = Math.min(Math.max(taRef.current.scrollHeight, 90), 240) + 'px';
         taRef.current.focus();
       }
-    }, [text]);
+    }, [text, mode]);
 
     function fire() {
       if (!text.trim()) return;
@@ -220,12 +369,13 @@
               fontFamily: variant.mono,
             }}>
               <span style={{ color: theme.textMuted }}>#</span>{' '}
-              {mode === 'chat' ? 'ask' : 'new-session'}
+              {mode === 'chat' ? 'ask' : mode === 'bind' ? 'bind-session' : 'new-session'}
             </h1>
             <ModeToggle value={mode} onChange={setMode} theme={theme} variant={variant} />
           </div>
 
-          {/* THE input box — same DNA as chat input, just bigger */}
+          {/* Code / Chat mode — the big input box */}
+          {mode !== 'bind' && (
           <div style={{
             background: theme.surface,
             border: `1px solid ${theme.borderStrong}`,
@@ -464,6 +614,112 @@
               </button>
             </div>
           </div>
+          )}
+
+          {/* Bind mode — environment + directory pills, then a table of
+              untracked on-disk sessions to adopt via the real bindSession API. */}
+          {mode === 'bind' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+                padding: '10px 14px',
+                background: theme.surface,
+                border: `1px solid ${theme.borderStrong}`,
+                borderRadius: variant.radius,
+                boxShadow: '0 1px 0 rgba(255,255,255,0.02) inset, 0 6px 20px rgba(0,0,0,0.18)',
+              }}>
+                <span style={{ fontSize: 11, color: theme.textMuted, fontFamily: variant.mono, marginRight: 2 }}>
+                  {variant.allMono ? 'env:' : 'Connect to:'}
+                </span>
+
+                {/* Environment */}
+                <Dropdown
+                  theme={theme} variant={variant} width={260} align="left"
+                  trigger={(open) => (
+                    <PillTrigger
+                      icon={<window.Icons.Server size={11} />}
+                      value={env || 'no env'}
+                      open={open} theme={theme} variant={variant}
+                    />
+                  )}
+                >
+                  {({ close }) => (
+                    <>
+                      <div style={{ padding: '5px 8px', fontSize: 10, color: theme.textMuted, fontFamily: variant.mono }}>
+                        registered clients
+                      </div>
+                      {environments.map(e => {
+                        const offline = !e.connected || !e.enabled;
+                        const stateLabel = !e.connected ? 'disconnected' : !e.enabled ? 'disabled' : null;
+                        return (
+                          <DropdownItem
+                            key={e.id}
+                            active={e.id === env}
+                            onClick={() => { if (!offline) { setEnv(e.id); setBindTargetId(null); close(); } }}
+                            theme={theme} variant={variant}
+                            icon={<span style={{
+                              width: 7, height: 7, borderRadius: '50%',
+                              background: offline ? theme.textMuted : theme.status.completed,
+                              display: 'inline-block', flexShrink: 0,
+                            }} />}
+                            label={
+                              <span>
+                                {e.name}
+                                <span style={{ color: theme.textMuted, marginLeft: 8, fontSize: 10.5 }}>{e.os}</span>
+                              </span>
+                            }
+                            hint={stateLabel}
+                          />
+                        );
+                      })}
+                    </>
+                  )}
+                </Dropdown>
+
+                {/* Directory */}
+                <Dropdown
+                  theme={theme} variant={variant} width={300} align="left"
+                  trigger={(open) => (
+                    <PillTrigger
+                      icon={<window.Icons.Folder size={11} />}
+                      value={displayPath(cwd)}
+                      open={open} theme={theme} variant={variant}
+                    />
+                  )}
+                >
+                  {({ close }) => (
+                    <>
+                      {cwds.map(c => (
+                        <DropdownItem
+                          key={c}
+                          active={c === cwd}
+                          onClick={() => { setCwd(c); setBindTargetId(null); close(); }}
+                          theme={theme} variant={variant}
+                          icon={<window.Icons.Folder size={11} />}
+                          label={
+                            <span style={{ fontFamily: variant.mono, fontSize: 11.5 }}>
+                              {displayPath(c)}
+                            </span>
+                          }
+                        />
+                      ))}
+                    </>
+                  )}
+                </Dropdown>
+              </div>
+
+              <BindSessionTable
+                env={env}
+                cwd={cwd}
+                onListSessions={onListSessions}
+                trackedIds={trackedIds}
+                selectedId={bindTargetId}
+                onSelect={setBindTargetId}
+                onBind={(s) => onBind && onBind({ env, cwd, sessionId: s.sessionId })}
+                theme={theme} variant={variant}
+              />
+            </div>
+          )}
 
           {/* Recents — only if we have history */}
           {recents.length > 0 && (

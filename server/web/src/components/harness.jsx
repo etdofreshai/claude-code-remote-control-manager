@@ -560,6 +560,24 @@
         });
     }
 
+    function handleBindSession({ env, cwd, sessionId }) {
+      if (!actions?.onBindSession) {
+        setScreen('chat');
+        return;
+      }
+      Promise.resolve(actions.onBindSession({ env, cwd, sessionId }))
+        .then((result) => {
+          if (result && result.sessionId && result.clientName) {
+            setActiveId(`${result.clientName}:${result.sessionId}`);
+          }
+          setScreen('chat');
+        })
+        .catch((err) => {
+          console.error('bind session failed', err);
+          alert(`Could not bind session: ${err?.message || err}`);
+        });
+    }
+
     // Listen for the launcher's "open settings" intent
     useEffect(() => {
       if (tweaks.__openSettings) setScreen('settings');
@@ -641,6 +659,8 @@
             theme={theme} variant={variant}
             tweaks={tweaks} setTweak={setTweak}
             onCreate={handleCreateSession}
+            onListSessions={actions?.onListSessions}
+            onBind={handleBindSession}
             onCancel={() => setScreen('chat')}
             hasActiveSession={!!activeId} />
 

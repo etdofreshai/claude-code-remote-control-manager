@@ -225,12 +225,9 @@ async function startQuery(opts: {
     push(bootstrapMessage({ provider: opts.provider, model: opts.model, effort: opts.effort }));
   }
 
-  // Intercept AskUserQuestion: the picker round-trip is broken in
-  // Anthropic's remote-control bridge (open issues #28508, #33625, #35125).
-  // Deny it with a redirect message so the model rephrases the question
-  // as a normal assistant message — which the Claude app does render
-  // correctly. Auto-allow everything else (we still set bypassPermissions
-  // for the rest).
+  // Tool gate. AskUserQuestion runs unintercepted now — the picker renders
+  // however it renders; we no longer redirect it to inline text. Everything
+  // else is auto-allowed (we also set bypassPermissions).
   const endpoint = resolveEndpoint(opts.provider, opts.model);
   const isNativeClaudeProvider = !endpoint.baseUrl;
   // All currently-supported gateways pass web_search through to a real
@@ -239,30 +236,6 @@ async function startQuery(opts: {
   // routes.
   const supportsWebSearch = true;
   const canUseTool = async (toolName: string, input: any) => {
-    if (toolName === "AskUserQuestion") {
-      const count = input?.questions?.length ?? 0;
-      console.log(
-        `session ${opts.sessionId}: redirecting AskUserQuestion to chat (questions=${count})`,
-      );
-      const totalLine =
-        count > 1
-          ? ` There are ${count} questions total — ask them ONE AT A TIME, waiting for the user's answer before posting the next.`
-          : "";
-      return {
-        behavior: "deny" as const,
-        message:
-          "AskUserQuestion is intercepted in this remote-control session because the picker UI doesn't yet round-trip cleanly over Anthropic's JSON-streaming bridge. " +
-          "Re-ask in plain assistant text using this format:\n" +
-          "\n" +
-          "1. Open the message with this exact disclaimer line: " +
-          "\"⚠️ AskUserQuestion isn't yet supported over remote JSON streaming — answering inline.\"\n" +
-          "2. Show ONE question only, followed by lettered options (a, b, c, d…) one per line, each with the option's label and a short description.\n" +
-          "3. Add a final \"Or type your own answer.\" line.\n" +
-          "4. Stop and wait for the user's reply." +
-          totalLine +
-          "\n\nDo not invoke AskUserQuestion again for this exchange.",
-      };
-    }
     if (toolName === "WebSearch" && !isNativeClaudeProvider && !supportsWebSearch) {
       const q = input?.query ?? "";
       console.log(
@@ -301,6 +274,9 @@ async function startQuery(opts: {
     },
   };
   if (CLAUDE_BIN) queryOptions.pathToClaudeCodeExecutable = CLAUDE_BIN;
+  // Apply the session's model. Without this the binary falls back to its own
+  // default (e.g. opus-4-7) regardless of what the session was created with.
+  if (opts.model) queryOptions.model = opts.model;
   if (opts.resume) queryOptions.resume = opts.sessionId;
   else queryOptions.sessionId = opts.sessionId;
   if (opts.name) queryOptions.extraArgs = { ...(queryOptions.extraArgs ?? {}), name: opts.name };

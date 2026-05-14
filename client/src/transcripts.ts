@@ -45,12 +45,12 @@ export function normalize(sdkMsg: any): TranscriptMessage[] {
   if (!sdkMsg || typeof sdkMsg !== "object") return [];
 
   if (sdkMsg.type === "system") {
-    // Only surface the session-init marker. Other system subtypes
-    // (turn_duration, etc.) are internal bookkeeping that the on-disk CLI
-    // transcript records — they aren't conversation and shouldn't render.
-    if (sdkMsg.subtype !== "init") return [];
-    const text = `Session started${sdkMsg.model ? ` · model ${sdkMsg.model}` : ""}`;
-    return [{ ts, role: "system", kind: "system", text }];
+    // System messages (init, turn_duration, etc.) are session bookkeeping,
+    // not conversation. "init" in particular arrives on every (re)spawn —
+    // resume, refresh, switch — so surfacing it just spams the transcript
+    // with repeated "Session started" lines. The active model already shows
+    // in each assistant message header.
+    return [];
   }
 
   if (sdkMsg.type !== "user" && sdkMsg.type !== "assistant") {

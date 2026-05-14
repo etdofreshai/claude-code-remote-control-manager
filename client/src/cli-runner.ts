@@ -66,6 +66,10 @@ export interface CliRunnerOpts {
   effort: string;
   onStatus?: (status: "starting" | "running" | "stopped" | "errored") => void;
   onLastMessageAt?: (iso: string) => void;
+  /** Fired when the claude process exits *unexpectedly* (i.e. not via a
+   *  caller-initiated close()/abort). Lets sessions.ts drop the dead runner
+   *  so the next command for this session respawns it. */
+  onExit?: () => void;
 }
 
 export interface CliRunningSession {
@@ -526,21 +530,29 @@ export function startCliRunner(opts: CliRunnerOpts): CliRunningSession {
   child.onExit(({ exitCode }) => {
     pty = null;
     clearInterval(fileTimer);
+    clearTimeout(fallbackTimer);
+    if (settleTimer) {
+      clearTimeout(settleTimer);
+      settleTimer = null;
+    }
     pollFile(); // flush any final lines
     if (closed || abort.signal.aborted) {
       opts.onStatus?.("stopped");
       return;
     }
     // Interactive claude doesn't exit on its own — an unexpected exit is a
-    // genuine failure. Leave it errored; sessions.ts (refresh / setEnabled /
-    // resumeAllTracked) can respawn it.
+    // genuine failure. Mark the status and notify sessions.ts so it drops the
+    // dead runner; the next command for this session then respawns it.
     if (exitCode === 0) {
-      console.log(`cli session ${opts.sessionId}: claude exited cleanly`);
+      console.log(
+        `cli session ${opts.sessionId}: claude exited unexpectedly (code 0)`,
+      );
       opts.onStatus?.("stopped");
     } else {
       console.error(`cli session ${opts.sessionId}: claude exited ${exitCode}`);
       opts.onStatus?.("errored");
     }
+    opts.onExit?.();
   });
 
   const push = (msg: any): void => {

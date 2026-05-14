@@ -211,6 +211,11 @@ async function startQueryCli(opts: {
     effort: opts.effort,
     onStatus: (status) => patch(opts.sessionId, { status }),
     onLastMessageAt: (iso) => patch(opts.sessionId, { lastMessageAt: iso }),
+    onExit: () => {
+      // Unexpected claude exit — drop the dead runner so the next command
+      // for this session (e.g. a message) respawns it via resume.
+      running.delete(opts.sessionId);
+    },
   });
 
   if (opts.noticeText) {
@@ -690,21 +695,53 @@ export type SendContentBlock =
 export async function sendMessage(
   sessionId: string,
   content: SendContentBlock[] | string,
-): Promise<{ sent: boolean; reason?: string }> {
+): Promise<{ sent: boolean; reason?: string; respawned?: boolean }> {
   if (!isUuid(sessionId)) throw new Error(`invalid session id: ${sessionId}`);
-  const rs = running.get(sessionId);
-  if (!rs) {
-    console.log(
-      `sendMessage: session ${sessionId} not in running map (running=${running.size})`,
-    );
-    return { sent: false, reason: "session not running" };
-  }
-  console.log(`sendMessage: pushing to session ${sessionId}`);
 
   const blocks: SendContentBlock[] =
     typeof content === "string" ? [{ type: "text", text: content }] : content;
   if (!Array.isArray(blocks) || blocks.length === 0)
     throw new Error("content must be a non-empty array or string");
+
+  let rs = running.get(sessionId);
+  let respawned = false;
+  if (!rs) {
+    // The runner isn't alive — either it never started or its underlying
+    // claude process exited (the CLI runner removes itself from `running` on
+    // an unexpected exit). Auto-respawn (resume) tracked + enabled sessions
+    // so the message still lands: the fresh runner queues it and delivers
+    // once it's ready.
+    const entry = load().find((s) => s.sessionId === sessionId);
+    if (!entry) {
+      console.log(`sendMessage: session ${sessionId} not tracked`);
+      return { sent: false, reason: "session not tracked" };
+    }
+    if (entry.enabled === false) {
+      console.log(`sendMessage: session ${sessionId} is disabled`);
+      return { sent: false, reason: "session disabled" };
+    }
+    console.log(
+      `sendMessage: session ${sessionId} not running — respawning (resume)`,
+    );
+    try {
+      rs = await startQuery({
+        sessionId,
+        workingDirectory: entry.workingDirectory,
+        resume: true,
+        name: entry.name,
+        provider: entry.provider ?? DEFAULT_PROVIDER,
+        model: entry.model,
+        effort: (entry.effort ?? DEFAULT_EFFORT) as Effort,
+        runtime: entry.runtime ?? DEFAULT_RUNTIME,
+        pushBootstrap: false,
+      });
+      respawned = true;
+    } catch (err) {
+      console.error(`sendMessage: respawn failed for ${sessionId}`, err);
+      return { sent: false, reason: "respawn failed" };
+    }
+  }
+  console.log(`sendMessage: pushing to session ${sessionId}`);
 
   rs.push({
     type: "user",
@@ -713,7 +750,7 @@ export async function sendMessage(
     timestamp: new Date().toISOString(),
   });
   patch(sessionId, { lastMessageAt: new Date().toISOString() });
-  return { sent: true };
+  return respawned ? { sent: true, respawned: true } : { sent: true };
 }
 
 /**

@@ -1,18 +1,52 @@
-// Partial CLI runner: drives a session by spawning `claude -p` per turn
-// instead of holding a long-lived SDK query. Exposes the same shape as the
-// SDK's RunningSession so the rest of sessions.ts can treat both modes
-// uniformly.
+// Interactive CLI runner: drives a session by spawning a *single*, long-lived
+// interactive `claude` process in a pseudo-terminal (node-pty) — no `-p`.
+//
+// Why not `claude -p`: print/headless mode (and the Agent SDK) bill against a
+// separate Agent SDK credit pool rather than the interactive Claude
+// subscription. Driving the real interactive TUI keeps a session counting as
+// normal subscription usage.
+//
+// How it works:
+//   - Input: user turns are injected into the PTY via bracketed paste + a
+//     carriage return. Bracketed paste lets us send multi-line text without
+//     the TUI treating newlines as submits or a leading "/" as a slash
+//     command. Turns are serialized — one in flight at a time.
+//   - Output & pacing: fully transcript-driven. We do NOT scrape the ANSI TUI
+//     render. Interactive `claude` writes the full structured transcript to
+//     ~/.claude/projects/<key>/<sessionId>.jsonl — the same file the SDK uses
+//     — so we tail it and forward new lines through recordSdkMessage (the
+//     same normalize path backfillFromDisk uses). The tail also drives pacing:
+//       * delivery — after pasting a turn we wait for claude to echo our user
+//         message into the JSONL. A lost paste (TUI not ready yet) is never
+//         *submitted*, so it is safe to re-paste — no duplicate turn.
+//       * completion — a turn is done when an assistant line lands with a
+//         terminal stop_reason (anything other than "tool_use"/"pause_turn").
+//   - First-run gates: the interactive TUI shows onboarding / folder-trust /
+//     bypass-permissions prompts that `-p` mode skips. We pre-seed the known
+//     ~/.claude.json flags AND auto-answer the prompts off the PTY as a
+//     safety net. Startup is the *only* place we read PTY output — and only
+//     to spot those gates and the "TUI is interactive" footer marker.
 //
 // Differences vs the SDK runner:
 //   - AskUserQuestion is blocked via --disallowed-tools and an appended
-//     system-prompt that tells the model to ask inline (mirrors the SDK
-//     path's canUseTool deny+redirect).
+//     system prompt telling the model to ask inline (mirrors the SDK path's
+//     canUseTool deny+redirect).
 //   - No enableRemoteControl bridge — CLI has no live control surface.
-//     This is the main feature the SDK keeps that CLI loses.
-//   - switchSession still works: each turn relaunches the subprocess so
-//     the new env-override takes effect on the very next push.
-import { spawn, type ChildProcessByStdio } from "node:child_process";
-import type { Readable } from "node:stream";
+//   - switchSession still works: sessions.ts kills + respawns the runner, so
+//     a new env-override / --resume takes effect on the next process.
+import { spawn as ptySpawn, type IPty } from "node-pty";
+import {
+  existsSync,
+  statSync,
+  openSync,
+  readSync,
+  closeSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { StringDecoder } from "node:string_decoder";
+import os from "node:os";
+import path from "node:path";
 import { resolveEndpoint } from "./providers.js";
 import { recordSdkMessage } from "./transcripts.js";
 
@@ -35,6 +69,13 @@ export interface CliRunnerOpts {
   effort: string;
   onStatus?: (status: "starting" | "running" | "stopped" | "errored") => void;
   onLastMessageAt?: (iso: string) => void;
+  /** Fired each time a turn completes — i.e. an assistant message with a
+   *  terminal stop_reason lands in the transcript. */
+  onTurnComplete?: () => void;
+  /** Fired when the claude process exits *unexpectedly* (i.e. not via a
+   *  caller-initiated close()/abort). Lets sessions.ts drop the dead runner
+   *  so the next command for this session respawns it. */
+  onExit?: () => void;
 }
 
 export interface CliRunningSession {
@@ -46,6 +87,45 @@ export interface CliRunningSession {
   ready: Promise<void>;
   query: null;
 }
+
+const CLAUDE_BIN = process.env.CLAUDE_CODE_EXECUTABLE?.trim() || "claude";
+
+// Bracketed-paste framing — see file header for why.
+const PASTE_START = "\x1b[200~";
+const PASTE_END = "\x1b[201~";
+const ENTER = "\r";
+
+// Turn pacing is fully transcript-driven (see file header). PASTE_CONFIRM_MS
+// is how long we wait for claude to echo a pasted turn into the JSONL before
+// assuming the paste was lost and re-sending; TURN_MAX_MS caps how long we
+// then wait for that turn's terminal stop_reason.
+const PASTE_CONFIRM_MS = 15_000;
+const PASTE_MAX_ATTEMPTS = 3;
+const TURN_MAX_MS = 10 * 60 * 1000;
+// Readiness: the TUI prints a flurry while it boots (welcome box, then
+// background churn — marketplace install, release notes, etc.). Pasting input
+// mid-churn gets eaten, so we wait for the interactive footer marker AND for
+// output to go quiet afterwards. (A too-early paste is caught by the
+// delivery-confirm retry above, so this only needs to be roughly right.)
+const POST_MARKER_SETTLE_MS = 3000; // quiet window required after the TUI marker
+const COLD_SETTLE_MS = 6000; // quiet window required if the marker never matches
+const READY_MIN_MS = 6000; // never declare ready sooner than this after spawn
+const READY_FALLBACK_MS = 30_000; // hard cap — declare ready regardless
+const PROMPT_ANSWER_DELAY_MS = 400; // let a startup prompt finish rendering first
+const PASTE_SUBMIT_DELAY_MS = 120; // gap between paste block and the submit CR
+const POLL_INTERVAL_MS = 300;
+
+// Startup prompts the interactive TUI can show before the main input is live.
+// The TUI lays text out with cursor moves rather than spaces, so we match on
+// a letters-only projection of the PTY output (see stripToLetters).
+const STARTUP_PROMPTS: Array<{ id: string; marker: string; keys: string }> = [
+  { id: "theme", marker: "choosethetextstyle", keys: ENTER },
+  { id: "trust", marker: "trustthisfolder", keys: "1" + ENTER },
+  { id: "bypass", marker: "bypasspermissionsmode", keys: "2" + ENTER },
+];
+// Letters-only projection of a stable footer string shown once the main TUI
+// is interactive ("shift+tab to cycle").
+const READY_MARKER = "shifttabtocycle";
 
 function buildCliEnv(opts: { provider: string; model?: string }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
@@ -69,6 +149,15 @@ function buildCliEnv(opts: { provider: string; model?: string }): NodeJS.Process
   return env;
 }
 
+// node-pty's env type rejects `undefined` values; ProcessEnv allows them.
+function toStringEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
 function extractTextFromUserMsg(msg: any): string | null {
   const content = msg?.message?.content;
   if (typeof content === "string") return content;
@@ -84,139 +173,497 @@ function extractTextFromUserMsg(msg: any): string | null {
   return null;
 }
 
+// A "user prompt" transcript line — a message we sent, as opposed to a
+// tool_result line (also type:"user"). Used to confirm a pasted turn actually
+// reached claude.
+function isUserPromptLine(parsed: any): boolean {
+  if (parsed?.type !== "user") return false;
+  const c = parsed.message?.content;
+  if (typeof c === "string") return true;
+  if (Array.isArray(c)) return c.some((b: any) => b?.type === "text");
+  return false;
+}
+
+// A turn-complete transcript line — an assistant message whose stop_reason is
+// terminal. "tool_use"/"pause_turn" mean claude will continue; anything else
+// ("end_turn", "stop_sequence", "max_tokens", …) means the turn is done.
+function isTurnCompleteLine(parsed: any): boolean {
+  if (parsed?.type !== "assistant") return false;
+  const sr = parsed.message?.stop_reason;
+  return typeof sr === "string" && sr !== "tool_use" && sr !== "pause_turn";
+}
+
+function projectKey(workingDirectory: string): string {
+  return workingDirectory.replace(/[\\/:]/g, "-");
+}
+
+function jsonlPathFor(sessionId: string, workingDirectory: string): string {
+  return path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    projectKey(workingDirectory),
+    `${sessionId}.jsonl`,
+  );
+}
+
+// Strip ESC (would break paste framing / allow ANSI injection) and normalize
+// CR/CRLF to LF — newlines are fine inside a bracketed paste.
+function sanitizeForPaste(text: string): string {
+  return text.replace(/\x1b/g, "").replace(/\r\n?/g, "\n");
+}
+
+// Letters-only, lowercased projection — the TUI positions words with cursor
+// moves rather than spaces, so this is the only reliable way to match a
+// rendered phrase. ESC sequences must be stripped *first* (they contain
+// letters like the SGR "m" terminator that would otherwise pollute the text);
+// digits, box-drawing, spaces, etc. then drop out too.
+function stripToLetters(s: string): string {
+  return s
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "") // CSI sequences
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "") // OSC sequences
+    .replace(/\x1b[@-_]/g, "") // other 2-byte ESC sequences
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
+}
+
+// Best-effort: pre-seed the ~/.claude.json flags that suppress the
+// interactive TUI's first-run prompts. Idempotent; per-directory and global
+// work is each done once per process. If the file is missing we create it; if
+// it exists but is unparseable we bail rather than risk clobbering real auth
+// state — the PTY auto-answer below is the actual reliability mechanism.
+let globalConfigSeeded = false;
+const projectConfigSeeded = new Set<string>();
+function seedClaudeConfig(workingDirectory: string): void {
+  if (globalConfigSeeded && projectConfigSeeded.has(workingDirectory)) return;
+  const configPath = path.join(os.homedir(), ".claude.json");
+  try {
+    let cfg: any = {};
+    if (existsSync(configPath)) {
+      try {
+        cfg = JSON.parse(readFileSync(configPath, "utf8"));
+      } catch (err) {
+        console.error(
+          "cli runner: ~/.claude.json is unparseable, skipping config seed",
+          err,
+        );
+        return;
+      }
+      if (!cfg || typeof cfg !== "object") return;
+    }
+    let changed = false;
+    if (cfg.hasCompletedOnboarding !== true) {
+      cfg.hasCompletedOnboarding = true;
+      changed = true;
+    }
+    if (typeof cfg.theme !== "string" || !cfg.theme) {
+      cfg.theme = "dark";
+      changed = true;
+    }
+    if (cfg.bypassPermissionsModeAccepted !== true) {
+      cfg.bypassPermissionsModeAccepted = true;
+      changed = true;
+    }
+    if (!cfg.projects || typeof cfg.projects !== "object") cfg.projects = {};
+    const proj = cfg.projects[workingDirectory] ?? {};
+    if (proj.hasTrustDialogAccepted !== true) {
+      proj.hasTrustDialogAccepted = true;
+      changed = true;
+    }
+    if (proj.hasCompletedProjectOnboarding !== true) {
+      proj.hasCompletedProjectOnboarding = true;
+      changed = true;
+    }
+    cfg.projects[workingDirectory] = proj;
+    if (changed) {
+      writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+      console.log(
+        `cli runner: seeded ~/.claude.json first-run flags for ${workingDirectory}`,
+      );
+    }
+    globalConfigSeeded = true;
+    projectConfigSeeded.add(workingDirectory);
+  } catch (err) {
+    console.error(
+      "cli runner: failed to seed ~/.claude.json (PTY auto-answer will cover startup prompts)",
+      err,
+    );
+  }
+}
+
 export function startCliRunner(opts: CliRunnerOpts): CliRunningSession {
   const abort = new AbortController();
-  let firstTurn = !opts.resume;
-  let queue: any[] = [];
-  let busy = false;
-  let active: ChildProcessByStdio<null, Readable, Readable> | null = null;
-  let closed = false;
+  const jsonlPath = jsonlPathFor(opts.sessionId, opts.workingDirectory);
 
-  // ready: SDK semantics — resolve as soon as the runner is willing to
-  // accept pushes. For CLI there's no init handshake to wait on.
-  const ready = Promise.resolve();
+  let queue: any[] = [];
+  let closed = false;
+  let draining = false;
+  let inputReady = false;
+  // Transcript-driven turn pacing: the JSONL tailer bumps these as it parses
+  // lines, and drain() awaits them.
+  let userPromptSeq = 0; // ++ when one of our pasted turns lands in the transcript
+  let turnDoneSeq = 0; // ++ when a turn-complete line lands
+
+  // ── JSONL tailer ──────────────────────────────────────────────────────
+  // On resume, start at the current EOF so we only forward *new* lines —
+  // startQueryCli backfills the existing history separately. For a brand-new
+  // session the file doesn't exist yet, so start at 0 and capture everything.
+  let fileOffset = 0;
+  if (opts.resume && existsSync(jsonlPath)) {
+    try {
+      fileOffset = statSync(jsonlPath).size;
+    } catch {
+      fileOffset = 0;
+    }
+  }
+  const decoder = new StringDecoder("utf8");
+  let lineBuf = "";
+
+  const pollFile = (): void => {
+    let size: number;
+    try {
+      if (!existsSync(jsonlPath)) return;
+      size = statSync(jsonlPath).size;
+    } catch {
+      return;
+    }
+    if (size < fileOffset) {
+      // File truncated/rotated — restart from the top.
+      fileOffset = 0;
+      lineBuf = "";
+    }
+    if (size === fileOffset) return;
+    let fd: number;
+    try {
+      fd = openSync(jsonlPath, "r");
+    } catch {
+      return;
+    }
+    try {
+      const len = size - fileOffset;
+      const buf = Buffer.allocUnsafe(len);
+      const read = readSync(fd, buf, 0, len, fileOffset);
+      fileOffset += read;
+      lineBuf += decoder.write(buf.subarray(0, read));
+    } catch (err) {
+      console.error(`cli session ${opts.sessionId}: jsonl read failed`, err);
+      return;
+    } finally {
+      closeSync(fd);
+    }
+    let nl: number;
+    while ((nl = lineBuf.indexOf("\n")) >= 0) {
+      const line = lineBuf.slice(0, nl).trim();
+      lineBuf = lineBuf.slice(nl + 1);
+      if (!line) continue;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        // Partial or non-JSON line — skip.
+        continue;
+      }
+      if (parsed?.type === "assistant" || parsed?.type === "user") {
+        opts.onLastMessageAt?.(new Date().toISOString());
+      }
+      if (isUserPromptLine(parsed)) userPromptSeq++;
+      if (isTurnCompleteLine(parsed)) {
+        turnDoneSeq++;
+        try {
+          opts.onTurnComplete?.();
+        } catch (err) {
+          console.error(
+            `cli session ${opts.sessionId}: onTurnComplete threw`,
+            err,
+          );
+        }
+      }
+      try {
+        recordSdkMessage(opts.sessionId, parsed);
+      } catch (err) {
+        console.error(`cli session ${opts.sessionId}: record failed`, err);
+      }
+    }
+  };
+  const fileTimer = setInterval(pollFile, POLL_INTERVAL_MS);
+
+  // ── spawn the interactive TUI ─────────────────────────────────────────
+  seedClaudeConfig(opts.workingDirectory);
+
+  const args: string[] = [
+    "--dangerously-skip-permissions",
+    "--disallowed-tools",
+    "AskUserQuestion",
+    "--append-system-prompt",
+    ASK_USER_QUESTION_REDIRECT,
+  ];
+  if (opts.resume) args.push("--resume", opts.sessionId);
+  else args.push("--session-id", opts.sessionId);
+
+  const env = toStringEnv(buildCliEnv({ provider: opts.provider, model: opts.model }));
+  console.log(
+    `cli session ${opts.sessionId}: spawning interactive claude (${opts.resume ? "resume" : "new"}) cwd=${opts.workingDirectory}`,
+  );
+
+  let pty: IPty | null = null;
+  try {
+    pty = ptySpawn(CLAUDE_BIN, args, {
+      name: "xterm-256color",
+      cols: 120,
+      rows: 40,
+      cwd: opts.workingDirectory,
+      env,
+    });
+  } catch (err) {
+    console.error(`cli session ${opts.sessionId}: pty spawn threw`, err);
+    clearInterval(fileTimer);
+    opts.onStatus?.("errored");
+    return {
+      sessionId: opts.sessionId,
+      workingDirectory: opts.workingDirectory,
+      abort,
+      push: () => {},
+      close: () => {},
+      ready: Promise.resolve(),
+      query: null,
+    };
+  }
+  const child = pty;
   opts.onStatus?.("running");
 
-  const runOne = (msg: any) => new Promise<void>((resolve) => {
-    const text = extractTextFromUserMsg(msg);
-    if (!text || !text.trim()) {
-      // Synthetic bootstrap messages have no useful CLI representation —
-      // just record them so the transcript reflects intent and skip.
-      console.log(`cli session ${opts.sessionId}: skipping empty/synthetic turn`);
-      try { recordSdkMessage(opts.sessionId, msg); } catch {}
-      resolve();
-      return;
-    }
+  // Poll `pred` until it's true or the timeout elapses. Resolves false on
+  // timeout or if the runner closed. Used to await transcript-driven signals.
+  const waitUntil = (
+    pred: () => boolean,
+    timeoutMs: number,
+  ): Promise<boolean> =>
+    new Promise((resolve) => {
+      const started = Date.now();
+      const tick = (): void => {
+        if (closed) return resolve(false);
+        if (pred()) return resolve(true);
+        if (Date.now() - started >= timeoutMs) return resolve(false);
+        setTimeout(tick, POLL_INTERVAL_MS);
+      };
+      setTimeout(tick, POLL_INTERVAL_MS);
+    });
 
-    const args = [
-      "-p",
-      "--output-format", "stream-json",
-      "--verbose",
-      "--dangerously-skip-permissions",
-      "--disallowed-tools", "AskUserQuestion",
-      "--append-system-prompt", ASK_USER_QUESTION_REDIRECT,
-    ];
-    if (firstTurn) {
-      args.push("--session-id", opts.sessionId);
-    } else {
-      args.push("--resume", opts.sessionId);
-    }
-    args.push("--", text);
-
-    const env = buildCliEnv({ provider: opts.provider, model: opts.model });
-    console.log(
-      `cli session ${opts.sessionId}: spawning claude (${firstTurn ? "new" : "resume"}) cwd=${opts.workingDirectory} textLen=${text.length}`,
-    );
-    let child: ChildProcessByStdio<null, Readable, Readable>;
+  // ── input drain — one turn in flight at a time, paced off the transcript ─
+  const drain = async (): Promise<void> => {
+    if (draining || !inputReady) return;
+    draining = true;
     try {
-      child = spawn("claude", args, {
-        cwd: opts.workingDirectory,
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-    } catch (err) {
-      console.error(`cli session ${opts.sessionId}: spawn threw`, err);
-      opts.onStatus?.("errored");
-      resolve();
-      return;
-    }
-    active = child;
-    firstTurn = false;
-
-    // Record the user message ourselves so it appears in the transcript
-    // immediately (CLI's first emitted event is a system init, not the
-    // user prompt echo).
-    try { recordSdkMessage(opts.sessionId, msg); } catch {}
-
-    let stdoutBuf = "";
-    let stderrBuf = "";
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdoutBuf += chunk.toString("utf8");
-      let nl: number;
-      while ((nl = stdoutBuf.indexOf("\n")) >= 0) {
-        const line = stdoutBuf.slice(0, nl).trim();
-        stdoutBuf = stdoutBuf.slice(nl + 1);
-        if (!line) continue;
-        let parsed: any = null;
-        try { parsed = JSON.parse(line); } catch {
-          // Non-JSON line — likely a warning from the CLI; skip.
+      while (queue.length > 0 && !closed && pty) {
+        const msg = queue.shift();
+        const text = extractTextFromUserMsg(msg);
+        if (!text || !text.trim()) {
+          // Synthetic/empty turns have no PTY representation — record so the
+          // transcript reflects intent, then skip. (Real turns are recorded
+          // by the JSONL tailer, which picks up claude's own user echo.)
+          console.log(
+            `cli session ${opts.sessionId}: skipping empty/synthetic turn`,
+          );
+          try {
+            recordSdkMessage(opts.sessionId, msg);
+          } catch {
+            /* ignore */
+          }
           continue;
         }
-        if (parsed?.type === "assistant" || parsed?.type === "user") {
-          opts.onLastMessageAt?.(new Date().toISOString());
-        }
-        try { recordSdkMessage(opts.sessionId, parsed); } catch (err) {
-          console.error(`cli session ${opts.sessionId}: record failed`, err);
-        }
-      }
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderrBuf += chunk.toString("utf8");
-    });
-    child.on("error", (err) => {
-      console.error(`cli session ${opts.sessionId}: spawn error`, err);
-      opts.onStatus?.("errored");
-    });
-    child.on("close", (code) => {
-      active = null;
-      if (code !== 0 && !abort.signal.aborted) {
-        console.error(
-          `cli session ${opts.sessionId}: claude exited ${code}; stderr=${stderrBuf.slice(0, 500)}`,
-        );
-      } else {
-        console.log(`cli session ${opts.sessionId}: claude turn complete (code ${code})`);
-      }
-      resolve();
-    });
-  });
+        const payload = sanitizeForPaste(text);
 
-  const drain = async () => {
-    if (busy) return;
-    busy = true;
-    try {
-      while (queue.length > 0 && !closed) {
-        const msg = queue.shift();
-        await runOne(msg);
+        // Deliver: paste + submit, then confirm claude echoed our message
+        // into the transcript. A lost paste (TUI not ready / re-render
+        // clobbered it) is never submitted, so re-pasting is safe — it can't
+        // produce a duplicate turn.
+        let delivered = false;
+        for (
+          let attempt = 1;
+          attempt <= PASTE_MAX_ATTEMPTS && !closed && pty;
+          attempt++
+        ) {
+          const baseUserSeq = userPromptSeq;
+          console.log(
+            `cli session ${opts.sessionId}: sending turn (attempt ${attempt}/${PASTE_MAX_ATTEMPTS}) textLen=${payload.length}`,
+          );
+          try {
+            child.write(PASTE_START + payload + PASTE_END);
+            await new Promise((r) => setTimeout(r, PASTE_SUBMIT_DELAY_MS));
+            if (closed || !pty) break;
+            child.write(ENTER);
+          } catch (err) {
+            console.error(`cli session ${opts.sessionId}: pty write failed`, err);
+            break;
+          }
+          if (await waitUntil(() => userPromptSeq > baseUserSeq, PASTE_CONFIRM_MS)) {
+            delivered = true;
+            break;
+          }
+          if (!closed) {
+            console.warn(
+              `cli session ${opts.sessionId}: turn not confirmed in transcript, retrying`,
+            );
+          }
+        }
+        if (!delivered) {
+          if (!closed) {
+            console.error(
+              `cli session ${opts.sessionId}: turn delivery failed after ${PASTE_MAX_ATTEMPTS} attempts, dropping message`,
+            );
+          }
+          continue;
+        }
+
+        // Wait for the turn to finish: an assistant line with a terminal
+        // stop_reason. Multi-tool turns stay "tool_use" until the last step.
+        const baseTurnSeq = turnDoneSeq;
+        const turnDone = await waitUntil(
+          () => turnDoneSeq > baseTurnSeq,
+          TURN_MAX_MS,
+        );
+        if (!turnDone && !closed) {
+          console.error(
+            `cli session ${opts.sessionId}: turn exceeded max wait, continuing`,
+          );
+        }
       }
     } finally {
-      busy = false;
-      if (closed) opts.onStatus?.("stopped");
+      draining = false;
     }
   };
 
-  const push = (msg: any) => {
+  // ── readiness + startup-prompt handling ───────────────────────────────
+  let readyResolve!: () => void;
+  const ready = new Promise<void>((res) => {
+    readyResolve = res;
+  });
+
+  const spawnedAt = Date.now();
+  let settleTimer: ReturnType<typeof setTimeout> | null = null;
+  let markerSeen = false;
+  const markReady = (): void => {
+    if (settleTimer) {
+      clearTimeout(settleTimer);
+      settleTimer = null;
+    }
+    if (!inputReady) {
+      inputReady = true;
+      readyResolve();
+      console.log(`cli session ${opts.sessionId}: input ready`);
+    }
+    if (!closed) void drain();
+  };
+  // (Re)arm the quiet-settle timer. The required quiet window shrinks once the
+  // interactive footer marker is seen; READY_MIN_MS keeps us from declaring
+  // ready during the very first render burst.
+  const armSettle = (): void => {
+    if (inputReady || closed) return;
+    if (settleTimer) clearTimeout(settleTimer);
+    const base = markerSeen ? POST_MARKER_SETTLE_MS : COLD_SETTLE_MS;
+    const delay = Math.max(base, READY_MIN_MS - (Date.now() - spawnedAt));
+    settleTimer = setTimeout(markReady, delay);
+  };
+
+  let startupScan = "";
+  const answeredPrompts = new Set<string>();
+
+  child.onData((data: string) => {
+    // Startup is the only time we read PTY output — to spot first-run prompts
+    // and the "TUI is interactive" footer marker. Once ready, the JSONL tail
+    // is the sole source of truth.
+    if (inputReady) return;
+
+    startupScan = (startupScan + stripToLetters(data)).slice(-16_384);
+    for (const prompt of STARTUP_PROMPTS) {
+      if (answeredPrompts.has(prompt.id)) continue;
+      if (!startupScan.includes(prompt.marker)) continue;
+      answeredPrompts.add(prompt.id);
+      startupScan = ""; // drop the matched render so we don't re-trigger
+      console.log(
+        `cli session ${opts.sessionId}: answering startup prompt "${prompt.id}"`,
+      );
+      setTimeout(() => {
+        if (closed || !pty) return;
+        try {
+          child.write(prompt.keys);
+        } catch (err) {
+          console.error(
+            `cli session ${opts.sessionId}: prompt answer write failed`,
+            err,
+          );
+        }
+      }, PROMPT_ANSWER_DELAY_MS);
+    }
+    if (!markerSeen && startupScan.includes(READY_MARKER)) {
+      markerSeen = true;
+      console.log(`cli session ${opts.sessionId}: TUI interactive marker seen`);
+    }
+    armSettle();
+  });
+  const fallbackTimer = setTimeout(markReady, READY_FALLBACK_MS);
+
+  child.onExit(({ exitCode }) => {
+    pty = null;
+    clearInterval(fileTimer);
+    clearTimeout(fallbackTimer);
+    if (settleTimer) {
+      clearTimeout(settleTimer);
+      settleTimer = null;
+    }
+    pollFile(); // flush any final lines
+    if (closed || abort.signal.aborted) {
+      opts.onStatus?.("stopped");
+      return;
+    }
+    // Interactive claude doesn't exit on its own — an unexpected exit is a
+    // genuine failure. Mark the status and notify sessions.ts so it drops the
+    // dead runner; the next command for this session then respawns it.
+    if (exitCode === 0) {
+      console.log(
+        `cli session ${opts.sessionId}: claude exited unexpectedly (code 0)`,
+      );
+      opts.onStatus?.("stopped");
+    } else {
+      console.error(`cli session ${opts.sessionId}: claude exited ${exitCode}`);
+      opts.onStatus?.("errored");
+    }
+    opts.onExit?.();
+  });
+
+  const push = (msg: any): void => {
     if (closed) return;
     queue.push(msg);
     void drain();
   };
 
-  const close = () => {
+  const close = (): void => {
+    if (closed) return;
     closed = true;
     queue = [];
-    try { abort.abort(); } catch {}
-    if (active && !active.killed) {
-      try { active.kill("SIGTERM"); } catch {}
+    clearInterval(fileTimer);
+    clearTimeout(fallbackTimer);
+    if (settleTimer) {
+      clearTimeout(settleTimer);
+      settleTimer = null;
+    }
+    try {
+      readyResolve();
+    } catch {
+      /* ignore */
+    }
+    try {
+      abort.abort();
+    } catch {
+      /* ignore */
+    }
+    const p = pty;
+    pty = null;
+    if (p) {
+      try {
+        p.kill("SIGTERM");
+      } catch {
+        /* ignore */
+      }
     }
     opts.onStatus?.("stopped");
   };

@@ -142,8 +142,8 @@
     );
     if (!env || !cwd) {
       return note(variant.allMono
-        ? '# pick an environment + directory above'
-        : 'Pick an environment and directory above to list sessions');
+        ? '# pick a client + directory above'
+        : 'Pick a client and directory above to list sessions');
     }
     if (loading) return note(variant.allMono ? '# loading…' : 'Loading sessions…');
     if (error) return note(`Could not list sessions: ${error && error.message ? error.message : error}`);
@@ -261,6 +261,55 @@
     );
   }
 
+  // Custom-path text entry for Bind mode — replaces the directory dropdown
+  // when the user picks "custom path". Keeps a local draft and only commits
+  // (Enter / blur / the ▾ button) so the session table doesn't refetch on
+  // every keystroke. The ▾ flips back to the directory list.
+  function CustomPathInput({ value, onCommit, onPickList, theme, variant }) {
+    const [draft, setDraft] = useState(value || '');
+    const commit = () => onCommit(draft.trim());
+    return (
+      <div style={{
+        display: 'inline-flex', alignItems: 'center', gap: 2,
+        background: theme.surface2,
+        border: `1px solid ${theme.borderStrong}`,
+        borderRadius: variant.radiusSm,
+        padding: '0 0 0 8px',
+      }}>
+        <window.Icons.Folder size={11} style={{ color: theme.textMuted, flexShrink: 0 }} />
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commit(); }
+            if (e.key === 'Escape') { e.preventDefault(); onPickList(); }
+          }}
+          placeholder={variant.allMono ? 'path…' : 'Enter a path…'}
+          style={{
+            background: 'transparent', border: 'none', outline: 'none',
+            color: theme.text, fontSize: 11.5, width: 210,
+            fontFamily: variant.mono, padding: '5px 4px',
+          }}
+        />
+        <button
+          onClick={() => { commit(); onPickList(); }}
+          title="Pick from the list instead"
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: theme.textMuted, padding: '6px 7px',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = theme.text; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = theme.textMuted; }}
+        >
+          <window.Icons.ChevronDown size={9} />
+        </button>
+      </div>
+    );
+  }
+
   function ModeToggle({ value, onChange, theme, variant }) {
     const opts = [
       { id: 'code', label: variant.allMono ? 'code' : 'Code', icon: <window.Icons.Wrench size={11} /> },
@@ -307,6 +356,13 @@
     const [cwd, setCwd] = useState('~/code/web-app');
     const [branch, setBranch] = useState('main');
     const [env, setEnv] = useState('local');
+    // Bind mode keeps its own client/directory selection, separate from Code
+    // mode's env/cwd: the client defaults to none (nothing else shows until
+    // one is picked), the directory list is scoped to the chosen client, and
+    // the directory can be a custom typed path.
+    const [bindEnv, setBindEnv] = useState(null);
+    const [bindCwd, setBindCwd] = useState(null);
+    const [bindCwdCustom, setBindCwdCustom] = useState(false);
     const taRef = useRef(null);
 
     const environments = data.environments || [];
@@ -329,11 +385,20 @@
       data.sessions.filter(s => s.cwd && s.cwd !== 'Chats').map(s => s.cwd)
     )), [data.sessions]);
 
-    // Sessions already tracked on the selected environment — Bind mode hides
-    // these so it only offers *untracked* on-disk sessions to adopt.
+    // Bind mode — directories and tracked-session ids scoped to the chosen
+    // client. `bindCwds` feeds the directory dropdown (the client's known
+    // dirs); `trackedIds` lets the table hide already-tracked sessions.
+    const bindCwds = useMemo(
+      () => Array.from(new Set(
+        data.sessions
+          .filter(s => s.clientName === bindEnv && s.cwd && s.cwd !== 'Chats')
+          .map(s => s.cwd)
+      )),
+      [data.sessions, bindEnv],
+    );
     const trackedIds = useMemo(
-      () => new Set(data.sessions.filter(s => s.clientName === env).map(s => s.sessionId)),
-      [data.sessions, env],
+      () => new Set(data.sessions.filter(s => s.clientName === bindEnv).map(s => s.sessionId)),
+      [data.sessions, bindEnv],
     );
 
     // Mock branches per cwd
@@ -653,16 +718,17 @@
                 boxShadow: '0 1px 0 rgba(255,255,255,0.02) inset, 0 6px 20px rgba(0,0,0,0.18)',
               }}>
                 <span style={{ fontSize: 11, color: theme.textMuted, fontFamily: variant.mono, marginRight: 2 }}>
-                  {variant.allMono ? 'env:' : 'Connect to:'}
+                  {variant.allMono ? 'client:' : 'Connect to:'}
                 </span>
 
-                {/* Environment */}
+                {/* Client / host — defaults to none; the directory picker and
+                    the session table stay hidden/empty until one is chosen. */}
                 <Dropdown
                   theme={theme} variant={variant} width={260} align="left"
                   trigger={(open) => (
                     <PillTrigger
                       icon={<window.Icons.Server size={11} />}
-                      value={env || 'no env'}
+                      value={bindEnv || (variant.allMono ? 'select client' : 'Select a client…')}
                       open={open} theme={theme} variant={variant}
                     />
                   )}
@@ -678,8 +744,8 @@
                         return (
                           <DropdownItem
                             key={e.id}
-                            active={e.id === env}
-                            onClick={() => { if (!offline) { setEnv(e.id); close(); } }}
+                            active={e.id === bindEnv}
+                            onClick={() => { if (!offline) { setBindEnv(e.id); setBindCwd(null); setBindCwdCustom(false); close(); } }}
                             theme={theme} variant={variant}
                             icon={<span style={{
                               width: 7, height: 7, borderRadius: '50%',
@@ -696,48 +762,74 @@
                           />
                         );
                       })}
+                      {environments.length === 0 && (
+                        <div style={{ padding: '6px 8px', fontSize: 11, color: theme.textMuted, fontFamily: variant.allMono ? variant.mono : 'inherit' }}>
+                          no registered clients
+                        </div>
+                      )}
                     </>
                   )}
                 </Dropdown>
 
-                {/* Directory */}
-                <Dropdown
-                  theme={theme} variant={variant} width={300} align="left"
-                  trigger={(open) => (
-                    <PillTrigger
-                      icon={<window.Icons.Folder size={11} />}
-                      value={displayPath(cwd)}
-                      open={open} theme={theme} variant={variant}
-                    />
-                  )}
-                >
-                  {({ close }) => (
-                    <>
-                      {cwds.map(c => (
+                {/* Directory — only once a client is chosen; scoped to that
+                    client's known dirs, with a custom-path escape hatch. */}
+                {bindEnv && !bindCwdCustom && (
+                  <Dropdown
+                    theme={theme} variant={variant} width={320} align="left"
+                    trigger={(open) => (
+                      <PillTrigger
+                        icon={<window.Icons.Folder size={11} />}
+                        value={bindCwd || (variant.allMono ? 'select directory' : 'Select a directory…')}
+                        open={open} theme={theme} variant={variant}
+                      />
+                    )}
+                  >
+                    {({ close }) => (
+                      <>
+                        {bindCwds.map(c => (
+                          <DropdownItem
+                            key={c}
+                            active={c === bindCwd}
+                            onClick={() => { setBindCwd(c); close(); }}
+                            theme={theme} variant={variant}
+                            icon={<window.Icons.Folder size={11} />}
+                            label={<span style={{ fontFamily: variant.mono, fontSize: 11.5 }}>{c}</span>}
+                          />
+                        ))}
+                        {bindCwds.length === 0 && (
+                          <div style={{ padding: '6px 8px', fontSize: 11, color: theme.textMuted, fontFamily: variant.allMono ? variant.mono : 'inherit' }}>
+                            no known directories
+                          </div>
+                        )}
+                        <div style={{ borderTop: `1px solid ${theme.border}`, margin: '4px 0' }} />
                         <DropdownItem
-                          key={c}
-                          active={c === cwd}
-                          onClick={() => { setCwd(c); close(); }}
+                          onClick={() => { setBindCwdCustom(true); close(); }}
                           theme={theme} variant={variant}
-                          icon={<window.Icons.Folder size={11} />}
-                          label={
-                            <span style={{ fontFamily: variant.mono, fontSize: 11.5 }}>
-                              {displayPath(c)}
-                            </span>
-                          }
+                          icon={<window.Icons.Plus size={11} />}
+                          label={variant.allMono ? 'custom path…' : 'Enter a custom path…'}
                         />
-                      ))}
-                    </>
-                  )}
-                </Dropdown>
+                      </>
+                    )}
+                  </Dropdown>
+                )}
+
+                {/* Directory — custom typed path; the ▾ flips back to the list. */}
+                {bindEnv && bindCwdCustom && (
+                  <CustomPathInput
+                    value={bindCwd}
+                    onCommit={setBindCwd}
+                    onPickList={() => setBindCwdCustom(false)}
+                    theme={theme} variant={variant}
+                  />
+                )}
               </div>
 
               <BindSessionTable
-                env={env}
-                cwd={cwd}
+                env={bindEnv}
+                cwd={bindCwd}
                 onListSessions={onListSessions}
                 trackedIds={trackedIds}
-                onBind={(s) => onBind && onBind({ env, cwd, sessionId: s.sessionId })}
+                onBind={(s) => onBind && onBind({ env: bindEnv, cwd: bindCwd, sessionId: s.sessionId })}
                 theme={theme} variant={variant}
               />
             </div>

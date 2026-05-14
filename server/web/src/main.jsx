@@ -79,6 +79,17 @@ function App() {
         }
         return { clientName: env, sessionId: newSessionId };
       },
+      // Bind mode: list on-disk sessions for an env+directory (the `list`
+      // agent command) so the launcher can offer untracked ones to adopt.
+      onListSessions: async (env, workingDirectory) => {
+        const r = await api.listAgentSessions(env, { workingDirectory, pageSize: 100 });
+        return r?.items || [];
+      },
+      // Adopt an existing on-disk session via the real bindSession API.
+      onBindSession: async ({ env, cwd, sessionId }) => {
+        const result = await api.bindSession(env, { workingDirectory: cwd, sessionId });
+        return { clientName: env, sessionId: result?.sessionId || sessionId };
+      },
     };
   }, [refresh, data?.environments]);
 

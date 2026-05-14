@@ -45,10 +45,11 @@ export function normalize(sdkMsg: any): TranscriptMessage[] {
   if (!sdkMsg || typeof sdkMsg !== "object") return [];
 
   if (sdkMsg.type === "system") {
-    const text =
-      sdkMsg.subtype === "init"
-        ? `Session started${sdkMsg.model ? ` · model ${sdkMsg.model}` : ""}`
-        : `[${sdkMsg.subtype || "system"}]`;
+    // Only surface the session-init marker. Other system subtypes
+    // (turn_duration, etc.) are internal bookkeeping that the on-disk CLI
+    // transcript records — they aren't conversation and shouldn't render.
+    if (sdkMsg.subtype !== "init") return [];
+    const text = `Session started${sdkMsg.model ? ` · model ${sdkMsg.model}` : ""}`;
     return [{ ts, role: "system", kind: "system", text }];
   }
 
@@ -72,15 +73,23 @@ export function normalize(sdkMsg: any): TranscriptMessage[] {
       case "text":
         out.push({ ts, role, kind: "text", text: String(block.text ?? ""), id: baseId });
         break;
-      case "thinking":
-        out.push({
-          ts, role, kind: "thinking",
-          text: String(block.thinking ?? block.text ?? ""),
-          summary: "Reasoning",
-          collapsed: true,
-          id: baseId,
-        });
+      case "thinking": {
+        // The interactive CLI persists thinking to the on-disk transcript as
+        // signature-only — the reasoning text is stripped. Skip empty
+        // thinking blocks rather than render a misleading empty "Reasoning"
+        // section; if a block ever does carry text, it still shows.
+        const thinkingText = String(block.thinking ?? block.text ?? "");
+        if (thinkingText.trim()) {
+          out.push({
+            ts, role, kind: "thinking",
+            text: thinkingText,
+            summary: "Reasoning",
+            collapsed: true,
+            id: baseId,
+          });
+        }
         break;
+      }
       case "tool_use":
         out.push({
           ts, role, kind: "tool",

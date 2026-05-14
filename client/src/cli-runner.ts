@@ -10,19 +10,22 @@
 //   - Input: user turns are injected into the PTY via bracketed paste + a
 //     carriage return. Bracketed paste lets us send multi-line text without
 //     the TUI treating newlines as submits or a leading "/" as a slash
-//     command. Turns are serialized (one in flight at a time).
-//   - Output: we do NOT scrape the ANSI TUI render for content. Interactive
-//     `claude` writes the full structured transcript to
-//     ~/.claude/projects/<key>/<sessionId>.jsonl — the same file the SDK
-//     uses — so we tail that file and forward new lines through
-//     recordSdkMessage (the same normalize path backfillFromDisk uses).
-//   - Turn pacing: the only thing read from raw PTY output is the coarse
-//     "esc to interrupt" busy marker the TUI re-renders while working; its
-//     absence for a debounce window means the turn is done.
+//     command. Turns are serialized — one in flight at a time.
+//   - Output & pacing: fully transcript-driven. We do NOT scrape the ANSI TUI
+//     render. Interactive `claude` writes the full structured transcript to
+//     ~/.claude/projects/<key>/<sessionId>.jsonl — the same file the SDK uses
+//     — so we tail it and forward new lines through recordSdkMessage (the
+//     same normalize path backfillFromDisk uses). The tail also drives pacing:
+//       * delivery — after pasting a turn we wait for claude to echo our user
+//         message into the JSONL. A lost paste (TUI not ready yet) is never
+//         *submitted*, so it is safe to re-paste — no duplicate turn.
+//       * completion — a turn is done when an assistant line lands with a
+//         terminal stop_reason (anything other than "tool_use"/"pause_turn").
 //   - First-run gates: the interactive TUI shows onboarding / folder-trust /
 //     bypass-permissions prompts that `-p` mode skips. We pre-seed the known
 //     ~/.claude.json flags AND auto-answer the prompts off the PTY as a
-//     safety net, so a headless client never wedges on them.
+//     safety net. Startup is the *only* place we read PTY output — and only
+//     to spot those gates and the "TUI is interactive" footer marker.
 //
 // Differences vs the SDK runner:
 //   - AskUserQuestion is blocked via --disallowed-tools and an appended
@@ -66,6 +69,9 @@ export interface CliRunnerOpts {
   effort: string;
   onStatus?: (status: "starting" | "running" | "stopped" | "errored") => void;
   onLastMessageAt?: (iso: string) => void;
+  /** Fired each time a turn completes — i.e. an assistant message with a
+   *  terminal stop_reason lands in the transcript. */
+  onTurnComplete?: () => void;
   /** Fired when the claude process exits *unexpectedly* (i.e. not via a
    *  caller-initiated close()/abort). Lets sessions.ts drop the dead runner
    *  so the next command for this session respawns it. */
@@ -89,20 +95,21 @@ const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
 const ENTER = "\r";
 
-// While Claude works a turn, the TUI continuously re-renders a status line
-// containing "esc to interrupt". Its absence for a debounce window means the
-// turn is idle and the next queued turn can be sent.
-const BUSY_MARKER = "interrupt";
-const IDLE_DEBOUNCE_MS = 1500;
-const TURN_GRACE_MS = 6000; // if we never observed "busy", send next anyway
-const TURN_MAX_MS = 10 * 60 * 1000; // hard cap so a stuck turn can't wedge the queue
+// Turn pacing is fully transcript-driven (see file header). PASTE_CONFIRM_MS
+// is how long we wait for claude to echo a pasted turn into the JSONL before
+// assuming the paste was lost and re-sending; TURN_MAX_MS caps how long we
+// then wait for that turn's terminal stop_reason.
+const PASTE_CONFIRM_MS = 15_000;
+const PASTE_MAX_ATTEMPTS = 3;
+const TURN_MAX_MS = 10 * 60 * 1000;
 // Readiness: the TUI prints a flurry while it boots (welcome box, then
 // background churn — marketplace install, release notes, etc.). Pasting input
 // mid-churn gets eaten, so we wait for the interactive footer marker AND for
-// output to go quiet afterwards.
+// output to go quiet afterwards. (A too-early paste is caught by the
+// delivery-confirm retry above, so this only needs to be roughly right.)
 const POST_MARKER_SETTLE_MS = 3000; // quiet window required after the TUI marker
 const COLD_SETTLE_MS = 6000; // quiet window required if the marker never matches
-const READY_MIN_MS = 4000; // never declare ready sooner than this after spawn
+const READY_MIN_MS = 6000; // never declare ready sooner than this after spawn
 const READY_FALLBACK_MS = 30_000; // hard cap — declare ready regardless
 const PROMPT_ANSWER_DELAY_MS = 400; // let a startup prompt finish rendering first
 const PASTE_SUBMIT_DELAY_MS = 120; // gap between paste block and the submit CR
@@ -164,6 +171,26 @@ function extractTextFromUserMsg(msg: any): string | null {
     if (parts.length > 0) return parts.join("\n");
   }
   return null;
+}
+
+// A "user prompt" transcript line — a message we sent, as opposed to a
+// tool_result line (also type:"user"). Used to confirm a pasted turn actually
+// reached claude.
+function isUserPromptLine(parsed: any): boolean {
+  if (parsed?.type !== "user") return false;
+  const c = parsed.message?.content;
+  if (typeof c === "string") return true;
+  if (Array.isArray(c)) return c.some((b: any) => b?.type === "text");
+  return false;
+}
+
+// A turn-complete transcript line — an assistant message whose stop_reason is
+// terminal. "tool_use"/"pause_turn" mean claude will continue; anything else
+// ("end_turn", "stop_sequence", "max_tokens", …) means the turn is done.
+function isTurnCompleteLine(parsed: any): boolean {
+  if (parsed?.type !== "assistant") return false;
+  const sr = parsed.message?.stop_reason;
+  return typeof sr === "string" && sr !== "tool_use" && sr !== "pause_turn";
 }
 
 function projectKey(workingDirectory: string): string {
@@ -272,6 +299,10 @@ export function startCliRunner(opts: CliRunnerOpts): CliRunningSession {
   let closed = false;
   let draining = false;
   let inputReady = false;
+  // Transcript-driven turn pacing: the JSONL tailer bumps these as it parses
+  // lines, and drain() awaits them.
+  let userPromptSeq = 0; // ++ when one of our pasted turns lands in the transcript
+  let turnDoneSeq = 0; // ++ when a turn-complete line lands
 
   // ── JSONL tailer ──────────────────────────────────────────────────────
   // On resume, start at the current EOF so we only forward *new* lines —
@@ -335,6 +366,18 @@ export function startCliRunner(opts: CliRunnerOpts): CliRunningSession {
       if (parsed?.type === "assistant" || parsed?.type === "user") {
         opts.onLastMessageAt?.(new Date().toISOString());
       }
+      if (isUserPromptLine(parsed)) userPromptSeq++;
+      if (isTurnCompleteLine(parsed)) {
+        turnDoneSeq++;
+        try {
+          opts.onTurnComplete?.();
+        } catch (err) {
+          console.error(
+            `cli session ${opts.sessionId}: onTurnComplete threw`,
+            err,
+          );
+        }
+      }
       try {
         recordSdkMessage(opts.sessionId, parsed);
       } catch (err) {
@@ -388,29 +431,24 @@ export function startCliRunner(opts: CliRunnerOpts): CliRunningSession {
   const child = pty;
   opts.onStatus?.("running");
 
-  // ── input drain — one turn in flight at a time ────────────────────────
-  let lastBusyAt = 0;
-
-  const waitForTurn = (sentAt: number): Promise<void> =>
-    new Promise<void>((resolve) => {
+  // Poll `pred` until it's true or the timeout elapses. Resolves false on
+  // timeout or if the runner closed. Used to await transcript-driven signals.
+  const waitUntil = (
+    pred: () => boolean,
+    timeoutMs: number,
+  ): Promise<boolean> =>
+    new Promise((resolve) => {
+      const started = Date.now();
       const tick = (): void => {
-        if (closed || !pty) return resolve();
-        const now = Date.now();
-        const sawBusy = lastBusyAt >= sentAt;
-        const quietFor = now - Math.max(lastBusyAt, sentAt);
-        if (sawBusy && quietFor >= IDLE_DEBOUNCE_MS) return resolve();
-        if (!sawBusy && now - sentAt >= TURN_GRACE_MS) return resolve();
-        if (now - sentAt >= TURN_MAX_MS) {
-          console.error(
-            `cli session ${opts.sessionId}: turn exceeded max wait, continuing`,
-          );
-          return resolve();
-        }
+        if (closed) return resolve(false);
+        if (pred()) return resolve(true);
+        if (Date.now() - started >= timeoutMs) return resolve(false);
         setTimeout(tick, POLL_INTERVAL_MS);
       };
       setTimeout(tick, POLL_INTERVAL_MS);
     });
 
+  // ── input drain — one turn in flight at a time, paced off the transcript ─
   const drain = async (): Promise<void> => {
     if (draining || !inputReady) return;
     draining = true;
@@ -433,27 +471,68 @@ export function startCliRunner(opts: CliRunnerOpts): CliRunningSession {
           continue;
         }
         const payload = sanitizeForPaste(text);
-        console.log(
-          `cli session ${opts.sessionId}: sending turn textLen=${payload.length}`,
-        );
-        const sentAt = Date.now();
-        try {
-          child.write(PASTE_START + payload + PASTE_END);
-          await new Promise((r) => setTimeout(r, PASTE_SUBMIT_DELAY_MS));
-          if (closed || !pty) break;
-          child.write(ENTER);
-        } catch (err) {
-          console.error(`cli session ${opts.sessionId}: pty write failed`, err);
-          break;
+
+        // Deliver: paste + submit, then confirm claude echoed our message
+        // into the transcript. A lost paste (TUI not ready / re-render
+        // clobbered it) is never submitted, so re-pasting is safe — it can't
+        // produce a duplicate turn.
+        let delivered = false;
+        for (
+          let attempt = 1;
+          attempt <= PASTE_MAX_ATTEMPTS && !closed && pty;
+          attempt++
+        ) {
+          const baseUserSeq = userPromptSeq;
+          console.log(
+            `cli session ${opts.sessionId}: sending turn (attempt ${attempt}/${PASTE_MAX_ATTEMPTS}) textLen=${payload.length}`,
+          );
+          try {
+            child.write(PASTE_START + payload + PASTE_END);
+            await new Promise((r) => setTimeout(r, PASTE_SUBMIT_DELAY_MS));
+            if (closed || !pty) break;
+            child.write(ENTER);
+          } catch (err) {
+            console.error(`cli session ${opts.sessionId}: pty write failed`, err);
+            break;
+          }
+          if (await waitUntil(() => userPromptSeq > baseUserSeq, PASTE_CONFIRM_MS)) {
+            delivered = true;
+            break;
+          }
+          if (!closed) {
+            console.warn(
+              `cli session ${opts.sessionId}: turn not confirmed in transcript, retrying`,
+            );
+          }
         }
-        await waitForTurn(sentAt);
+        if (!delivered) {
+          if (!closed) {
+            console.error(
+              `cli session ${opts.sessionId}: turn delivery failed after ${PASTE_MAX_ATTEMPTS} attempts, dropping message`,
+            );
+          }
+          continue;
+        }
+
+        // Wait for the turn to finish: an assistant line with a terminal
+        // stop_reason. Multi-tool turns stay "tool_use" until the last step.
+        const baseTurnSeq = turnDoneSeq;
+        const turnDone = await waitUntil(
+          () => turnDoneSeq > baseTurnSeq,
+          TURN_MAX_MS,
+        );
+        if (!turnDone && !closed) {
+          console.error(
+            `cli session ${opts.sessionId}: turn exceeded max wait, continuing`,
+          );
+        }
       }
     } finally {
       draining = false;
     }
   };
 
-  // ── readiness + startup-prompt handling + busy tracking ───────────────
+  // ── readiness + startup-prompt handling ───────────────────────────────
   let readyResolve!: () => void;
   const ready = new Promise<void>((res) => {
     readyResolve = res;
@@ -485,19 +564,15 @@ export function startCliRunner(opts: CliRunnerOpts): CliRunningSession {
     settleTimer = setTimeout(markReady, delay);
   };
 
-  let busyScanTail = "";
   let startupScan = "";
   const answeredPrompts = new Set<string>();
 
   child.onData((data: string) => {
-    // Busy-marker tracking — used after ready for turn pacing; harmless before.
-    const hay = busyScanTail + data;
-    if (hay.includes(BUSY_MARKER)) lastBusyAt = Date.now();
-    busyScanTail = hay.slice(-64);
-
+    // Startup is the only time we read PTY output — to spot first-run prompts
+    // and the "TUI is interactive" footer marker. Once ready, the JSONL tail
+    // is the sole source of truth.
     if (inputReady) return;
 
-    // Startup phase: watch for first-run prompts and the "TUI is live" marker.
     startupScan = (startupScan + stripToLetters(data)).slice(-16_384);
     for (const prompt of STARTUP_PROMPTS) {
       if (answeredPrompts.has(prompt.id)) continue;

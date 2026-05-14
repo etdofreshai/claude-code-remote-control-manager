@@ -211,6 +211,11 @@ async function startQueryCli(opts: {
     effort: opts.effort,
     onStatus: (status) => patch(opts.sessionId, { status }),
     onLastMessageAt: (iso) => patch(opts.sessionId, { lastMessageAt: iso }),
+    onTurnComplete: () => {
+      // The turn's final assistant message already replicates upstream via
+      // recordSdkMessage; this is just an observable "claude is idle again".
+      console.log(`session ${opts.sessionId}: turn complete`);
+    },
     onExit: () => {
       // Unexpected claude exit — drop the dead runner so the next command
       // for this session (e.g. a message) respawns it via resume.

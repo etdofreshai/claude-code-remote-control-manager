@@ -362,9 +362,10 @@
     const [text, setText] = useState('');
     const [provider, setProvider] = useState('claude');
     const [model, setModel] = useState('sonnet');
-    const [cwd, setCwd] = useState('~/code/web-app');
+    const [cwd, setCwd] = useState(null);
     const [branch, setBranch] = useState('main');
-    const [env, setEnv] = useState('local');
+    const [env, setEnv] = useState(null);
+    const [cwdCustom, setCwdCustom] = useState(false);
     // Bind mode keeps its own client/directory selection, separate from Code
     // mode's env/cwd: the client defaults to none (nothing else shows until
     // one is picked), the directory list is scoped to the chosen client, and
@@ -378,21 +379,13 @@
     const gitRepos = data.gitRepos || [];
     const isGitRepo = gitRepos.includes(cwd);
 
-    // Translate a cwd display string based on the platform of the selected env.
-    // We store paths canonically (unix-style with ~ and /), and rewrite for
-    // display only when the target is Windows.
-    const currentEnv = environments.find(e => e.id === env);
-    const isWindowsEnv = currentEnv && currentEnv.platform === 'windows';
-    function displayPath(p) {
-      if (!p) return p;
-      if (!isWindowsEnv) return p;
-      // ~/code/web-app  →  C:\Users\you\code\web-app
-      return p.replace(/^~\//, 'C:\\Users\\you\\').replace(/\//g, '\\');
-    }
-
+    // Code mode — directories scoped to the selected client (host); same
+    // shape as bindCwds. Feeds the directory dropdown once a client is picked.
     const cwds = useMemo(() => Array.from(new Set(
-      data.sessions.filter(s => s.cwd && s.cwd !== 'Chats').map(s => s.cwd)
-    )), [data.sessions]);
+      data.sessions
+        .filter(s => s.clientName === env && s.cwd && s.cwd !== 'Chats')
+        .map(s => s.cwd)
+    )), [data.sessions, env]);
 
     // Bind mode — directories and tracked-session ids scoped to the chosen
     // client. `bindCwds` feeds the directory dropdown (the client's known
@@ -424,8 +417,12 @@
       }
     }, [text, mode]);
 
+    // Code mode needs a host + directory before it can start; chat mode just
+    // needs text. (Bind mode doesn't use the input box at all.)
+    const canFire = mode === 'code' ? !!(text.trim() && env && cwd) : !!text.trim();
+
     function fire() {
-      if (!text.trim()) return;
+      if (!canFire) return;
       onCreate && onCreate({ mode, text, provider, model,
         cwd: mode === 'code' ? cwd : null,
         branch: mode === 'code' ? branch : null,
@@ -550,14 +547,15 @@
                 }}
               </Dropdown>
 
-              {/* Environment — only in code mode, between model and cwd */}
+              {/* Client / host — only in code mode; defaults to none, and the
+                  directory + Start stay gated until one is chosen. */}
               {mode === 'code' && (
                 <Dropdown
                   theme={theme} variant={variant} width={260} align="left"
                   trigger={(open) => (
                     <PillTrigger
                       icon={<window.Icons.Server size={11} />}
-                      value={env || 'no env'}
+                      value={env || (variant.allMono ? 'select client' : 'Select a client…')}
                       open={open} theme={theme} variant={variant}
                     />
                   )}
@@ -577,7 +575,7 @@
                           <DropdownItem
                             key={e.id}
                             active={e.id === env}
-                            onClick={() => { if (!offline) { setEnv(e.id); close(); } }}
+                            onClick={() => { if (!offline) { setEnv(e.id); setCwd(null); setCwdCustom(false); setBranch('main'); close(); } }}
                             theme={theme} variant={variant}
                             icon={<span style={{
                               width: 7, height: 7, borderRadius: '50%',
@@ -596,27 +594,25 @@
                           />
                         );
                       })}
-                      <div style={{ borderTop: `1px solid ${theme.border}`, margin: '4px 0' }} />
-                      <DropdownItem
-                        onClick={() => { setEnv(null); close(); }}
-                        active={env == null}
-                        theme={theme} variant={variant}
-                        icon={<window.Icons.X size={11} />}
-                        label={variant.allMono ? 'no environment' : 'No environment'}
-                      />
+                      {environments.length === 0 && (
+                        <div style={{ padding: '6px 8px', fontSize: 11, color: theme.textMuted, fontFamily: variant.allMono ? variant.mono : 'inherit' }}>
+                          no registered clients
+                        </div>
+                      )}
                     </>
                   )}
                 </Dropdown>
               )}
 
-              {/* CWD — only in code mode */}
-              {mode === 'code' && (
+              {/* Directory — only once a client is chosen; scoped to that
+                  client's known dirs, with a custom-path escape hatch. */}
+              {mode === 'code' && env && !cwdCustom && (
                 <Dropdown
                   theme={theme} variant={variant} width={300}
                   trigger={(open) => (
                     <PillTrigger
                       icon={<window.Icons.Folder size={11} />}
-                      value={displayPath(cwd)}
+                      value={cwd || (variant.allMono ? 'select directory' : 'Select a directory…')}
                       open={open} theme={theme} variant={variant}
                     />
                   )}
@@ -630,27 +626,38 @@
                           onClick={() => { setCwd(c); close(); }}
                           theme={theme} variant={variant}
                           icon={<window.Icons.Folder size={11} />}
-                          label={
-                            <span style={{ fontFamily: variant.mono, fontSize: 11.5 }}>
-                              {displayPath(c)}
-                            </span>
-                          }
+                          label={<span style={{ fontFamily: variant.mono, fontSize: 11.5 }}>{c}</span>}
                         />
                       ))}
+                      {cwds.length === 0 && (
+                        <div style={{ padding: '6px 8px', fontSize: 11, color: theme.textMuted, fontFamily: variant.allMono ? variant.mono : 'inherit' }}>
+                          no known directories
+                        </div>
+                      )}
                       <div style={{ borderTop: `1px solid ${theme.border}`, margin: '4px 0' }} />
                       <DropdownItem
-                        onClick={() => { close(); }}
+                        onClick={() => { setCwdCustom(true); close(); }}
                         theme={theme} variant={variant}
                         icon={<window.Icons.Plus size={11} />}
-                        label={variant.allMono ? 'browse…' : 'Browse for folder…'}
+                        label={variant.allMono ? 'custom path…' : 'Enter a custom path…'}
                       />
                     </>
                   )}
                 </Dropdown>
               )}
 
-              {/* Branch — only if cwd is a git repo */}
-              {mode === 'code' && isGitRepo && (
+              {/* Directory — custom typed path; the ▾ flips back to the list. */}
+              {mode === 'code' && env && cwdCustom && (
+                <CustomPathInput
+                  value={cwd}
+                  onCommit={setCwd}
+                  onPickList={() => setCwdCustom(false)}
+                  theme={theme} variant={variant}
+                />
+              )}
+
+              {/* Branch — only once host + directory are picked and it's a git repo */}
+              {mode === 'code' && env && cwd && isGitRepo && (
                 <Dropdown
                   theme={theme} variant={variant} width={220}
                   trigger={(open) => (
@@ -688,15 +695,15 @@
               {/* Send */}
               <button
                 onClick={fire}
-                disabled={!text.trim()}
+                disabled={!canFire}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 6,
-                  background: text.trim() ? theme.accent : theme.surface2,
-                  color: text.trim() ? theme.accentText : theme.textMuted,
-                  border: `1px solid ${text.trim() ? theme.accent : theme.border}`,
+                  background: canFire ? theme.accent : theme.surface2,
+                  color: canFire ? theme.accentText : theme.textMuted,
+                  border: `1px solid ${canFire ? theme.accent : theme.border}`,
                   borderRadius: variant.radiusSm,
                   padding: '5px 11px',
-                  fontSize: 12, cursor: text.trim() ? 'pointer' : 'default',
+                  fontSize: 12, cursor: canFire ? 'pointer' : 'default',
                   fontFamily: variant.allMono ? variant.mono : 'inherit',
                   fontWeight: 500,
                 }}
@@ -706,7 +713,7 @@
                 <span style={{
                   fontSize: 10, fontFamily: variant.mono,
                   padding: '0 3px',
-                  border: `1px solid ${text.trim() ? 'rgba(255,255,255,0.3)' : theme.border}`,
+                  border: `1px solid ${canFire ? 'rgba(255,255,255,0.3)' : theme.border}`,
                   borderRadius: 3, opacity: 0.85,
                 }}>⏎</span>
               </button>

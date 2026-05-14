@@ -213,7 +213,16 @@
                 fontSize: 12.5, color: theme.text,
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 letterSpacing: variant.letterSpacing,
-              }}>{s.title || s.sessionId}</div>
+              }}>
+                {s.title && s.title !== s.sessionId ? (
+                  <>
+                    {s.title}
+                    <span style={{ color: theme.textMuted, fontFamily: variant.mono, fontSize: 11, marginLeft: 6 }}>
+                      {s.sessionId}
+                    </span>
+                  </>
+                ) : s.sessionId}
+              </div>
               <div style={{
                 fontSize: 10, color: theme.textMuted, fontFamily: variant.mono, marginTop: 2,
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',

@@ -16,6 +16,9 @@ export interface TrackedSession {
   addedAt: string;
   lastMessageAt?: string;
   status?: "starting" | "running" | "errored" | "stopped" | "disabled";
+  /** Codex SDK thread id; populated after the first turn for provider=codex.
+   *  Used to resume the same thread across client restarts. */
+  codexThreadId?: string;
 }
 
 const STATE_DIR =

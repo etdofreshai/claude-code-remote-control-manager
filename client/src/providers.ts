@@ -62,6 +62,18 @@ function defaultProviders(): ProvidersConfig {
         "glm-5.1": { baseUrl: zaiUrl, authToken: zaiToken },
       },
     },
+    // Native codex provider — routes through @openai/codex-sdk (not the
+    // Claude Agent SDK). Auth uses `codex login` cached credentials or
+    // OPENAI_API_KEY; no upstream baseUrl override needed.
+    // Distinct from `litellm.codex` below, which proxies the same model
+    // family through an Anthropic-compatible bridge.
+    codex: {
+      models: [
+        "gpt-5.5",
+        "gpt-5.3-codex-spark",
+        "gpt-5.3-codex",
+      ],
+    },
     litellm: {
       baseUrl: liteUrl,
       authToken: liteToken,

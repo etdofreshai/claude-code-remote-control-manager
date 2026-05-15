@@ -176,6 +176,16 @@ export function recordSdkMessage(sessionId: string, sdkMsg: any): void {
   postAppend(sessionId, msgs, false).catch(() => {});
 }
 
+/** Append already-canonical transcript messages. Used by non-Claude runners
+ *  (codex SDK) that produce events in their own shape and normalize locally. */
+export function appendMessages(
+  sessionId: string,
+  messages: TranscriptMessage[],
+): void {
+  if (!messages.length) return;
+  postAppend(sessionId, messages, false).catch(() => {});
+}
+
 /** Replace the entire stored transcript for a session (used for backfill). */
 export function backfillTranscript(
   sessionId: string,

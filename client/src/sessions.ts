@@ -7,6 +7,7 @@ import { load, save, type TrackedSession, type Effort } from "./state.js";
 import { readSessionTitle } from "./list.js";
 import { getProvider, resolveEndpoint } from "./providers.js";
 import { recordSdkMessage, backfillFromDisk } from "./transcripts.js";
+import { startCodexRunner } from "./codex-sdk-runner.js";
 
 // The SDK looks for its own bundled binary by default; point it at the
 // system claude install when CLAUDE_CODE_EXECUTABLE is set (the Docker image
@@ -204,6 +205,58 @@ function buildEnvOverrides(opts: {
   return overrides;
 }
 
+async function startQueryCodex(opts: {
+  sessionId: string;
+  workingDirectory: string;
+  resume: boolean;
+  model?: string;
+  effort: Effort;
+  pushBootstrap: boolean;
+  noticeText?: string;
+}): Promise<RunningSession> {
+  const tracked = load().find((s) => s.sessionId === opts.sessionId);
+  const runner = startCodexRunner({
+    sessionId: opts.sessionId,
+    workingDirectory: opts.workingDirectory,
+    resume: opts.resume,
+    codexThreadId: tracked?.codexThreadId,
+    model: opts.model,
+    effort: opts.effort,
+    onStatus: (status) => patch(opts.sessionId, { status }),
+    onLastMessageAt: (iso) => patch(opts.sessionId, { lastMessageAt: iso }),
+    onCodexThreadId: (id) => patch(opts.sessionId, { codexThreadId: id }),
+  });
+
+  if (opts.noticeText) {
+    runner.push({
+      type: "user",
+      message: { role: "user", content: opts.noticeText },
+      parent_tool_use_id: null,
+      isSynthetic: true,
+      timestamp: new Date().toISOString(),
+    });
+  } else if (!opts.resume && opts.pushBootstrap) {
+    runner.push(bootstrapMessage({
+      provider: "codex",
+      model: opts.model,
+      effort: opts.effort,
+    }));
+  }
+
+  patch(opts.sessionId, { status: "running" });
+  const rs: RunningSession = {
+    sessionId: runner.sessionId,
+    workingDirectory: runner.workingDirectory,
+    abort: runner.abort,
+    push: runner.push,
+    close: runner.close,
+    ready: runner.ready,
+    query: runner.query,
+  };
+  running.set(opts.sessionId, rs);
+  return rs;
+}
+
 async function startQuery(opts: {
   sessionId: string;
   workingDirectory: string;
@@ -218,6 +271,19 @@ async function startQuery(opts: {
    *  in-band notices like model-switch announcements. */
   noticeText?: string;
 }): Promise<RunningSession> {
+  // Codex sessions go through @openai/codex-sdk, not the Claude Agent SDK.
+  if (opts.provider === "codex") {
+    return startQueryCodex({
+      sessionId: opts.sessionId,
+      workingDirectory: opts.workingDirectory,
+      resume: opts.resume,
+      model: opts.model,
+      effort: opts.effort,
+      pushBootstrap: opts.pushBootstrap,
+      noticeText: opts.noticeText,
+    });
+  }
+
   const { stream, push, close } = createMessageStream();
   const abort = new AbortController();
 

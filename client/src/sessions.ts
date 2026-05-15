@@ -148,6 +148,18 @@ function createMessageStream() {
   };
 }
 
+// True if an SDK user-type message is just the prompt echoed back, vs a
+// tool_result sub-message in an agentic loop. Prompt echoes are pure text
+// (string content, or all blocks of type "text"); tool_result messages carry
+// at least one block of type "tool_result".
+function isPromptEcho(msg: any): boolean {
+  if (msg?.type !== "user") return false;
+  const content = msg?.message?.content;
+  if (typeof content === "string") return true;
+  if (!Array.isArray(content)) return false;
+  return content.every((b: any) => b?.type === "text");
+}
+
 function bootstrapMessage(opts: {
   provider: string;
   model?: string;
@@ -366,6 +378,13 @@ async function startQuery(opts: {
           patch(opts.sessionId, { lastMessageAt: new Date().toISOString() });
           if (!enabled) await enable("first-message");
         }
+        // The SDK echoes the prompt back as a user-type text message after
+        // the assistant turn. sendMessage already records the prompt
+        // optimistically, so replicating it here produces a duplicate entry
+        // ordered after the reply (You → assistant → You). Tool-result
+        // user messages still flow through — those are sub-messages in
+        // agentic loops, not prompt echoes.
+        if (msg?.type === "user" && isPromptEcho(msg)) continue;
         // Fire-and-forget replicate to the server's transcript store; the SDK's
         // local session file on disk remains the source of truth.
         recordSdkMessage(opts.sessionId, msg);

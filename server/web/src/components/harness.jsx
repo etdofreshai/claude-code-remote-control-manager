@@ -414,7 +414,8 @@
           onSwitchModel={onSwitchModel}
           isStreaming={isStreaming}
           theme={theme} variant={variant}
-          session={session} />
+          session={session}
+          environments={environments} />
 
       </main>);
 

@@ -458,11 +458,37 @@
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); }
     }
 
-    const providers = window.PROVIDERS || {
-      claude: { label: 'Anthropic', models: ['haiku', 'sonnet', 'opus'] },
-      codex:  { label: 'OpenAI',    models: ['gpt-5.5'] },
-      gemini: { label: 'Google',    models: ['pro-3-1-preview'] },
-    };
+    // Aggregate providers/models across every connected client (same source
+    // as Settings → Providers). Falls back to an empty map if nothing's
+    // registered yet.
+    const PROVIDER_LABELS = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' };
+    const providers = useMemo(() => {
+      const byProvider = new Map();
+      for (const e of environments) {
+        for (const [pId, info] of Object.entries(e.providers || {})) {
+          if (!byProvider.has(pId)) byProvider.set(pId, { label: PROVIDER_LABELS[pId] || pId, models: new Set() });
+          for (const m of info.models || []) byProvider.get(pId).models.add(m);
+        }
+      }
+      const out = {};
+      for (const [pId, p] of byProvider.entries()) {
+        out[pId] = { label: p.label, models: Array.from(p.models) };
+      }
+      return out;
+    }, [environments]);
+
+    // Snap default provider/model to the first real one once data arrives,
+    // and re-snap if the currently selected pair vanishes from the list.
+    useEffect(() => {
+      const ids = Object.keys(providers);
+      if (!ids.length) return;
+      const pId = providers[provider] ? provider : ids[0];
+      const models = providers[pId]?.models || [];
+      if (!models.length) return;
+      const m = models.includes(model) ? model : models[0];
+      if (pId !== provider) setProvider(pId);
+      if (m !== model) setModel(m);
+    }, [providers, provider, model]);
 
     // Recent sessions to continue
     const recents = data.sessions.slice(0, 4);

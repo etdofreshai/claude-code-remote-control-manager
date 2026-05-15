@@ -7,14 +7,11 @@
 //   streaming + user typed → "Steer"  (sends a redirect mid-stream)
 
 (function () {
-  const { useState, useRef, useEffect } = React;
+  const { useState, useRef, useEffect, useMemo } = React;
 
-  const PROVIDERS = {
-    claude: { label: 'Claude', color: '#cc785c', models: ['haiku', 'sonnet', 'opus'] },
-    codex: { label: 'Codex', color: '#10a37f', models: ['gpt-5.5'] },
-    gemini: { label: 'Gemini', color: '#4285f4', models: ['pro-3-1-preview'] }
-  };
-  window.PROVIDERS = PROVIDERS;
+  // Provider labels — model lists come from the live client registration
+  // passed in as a `providers` prop. This map is just a cosmetic name lookup.
+  const PROVIDER_LABELS = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' };
 
   function Pill({ active, onClick, children, theme, variant, kbd, color }) {
     const dim = color || theme.textDim;
@@ -81,15 +78,16 @@
 
   }
 
-  function ModelPicker({ provider, model, onChange, theme, variant }) {
+  function ModelPicker({ provider, model, onChange, theme, variant, providers }) {
     const [open, setOpen] = useState(false);
     const items = [];
-    Object.entries(PROVIDERS).forEach(([pId, p]) => {
-      p.models.forEach((m) => {
+    Object.entries(providers || {}).forEach(([pId, p]) => {
+      const label = p.label || PROVIDER_LABELS[pId] || pId;
+      (p.models || []).forEach((m) => {
         items.push({
           label: (
             <span>
-              <span style={{ color: theme.textDim }}>{p.label}</span>
+              <span style={{ color: theme.textDim }}>{label}</span>
               <span style={{ color: theme.textMuted, margin: '0 5px' }}>/</span>
               <span>{m}</span>
             </span>
@@ -352,7 +350,7 @@
 
   }
 
-  function InputBox({ onSend, onStop, onSteer, onSwitchModel, theme, variant, session, isStreaming }) {
+  function InputBox({ onSend, onStop, onSteer, onSwitchModel, theme, variant, session, isStreaming, environments }) {
     const [text, setText] = useState('');
     const [provider, setProvider] = useState(session.provider);
     const [model, setModel] = useState(session.model);
@@ -366,6 +364,25 @@
       setModel(session.model);
       setEffort(session.effort || 'medium');
     }, [session.id]);
+
+    // Build the model picker list from the live client registration. Prefer
+    // the environment matching this session's clientName; if none matches
+    // (mid-restart, say), aggregate across all known environments.
+    const providers = useMemo(() => {
+      const out = {};
+      const envs = environments || [];
+      const matching = envs.find((e) => e.id === session.clientName) || envs.find((e) => e.id === session.env);
+      const pool = matching ? [matching] : envs;
+      for (const e of pool) {
+        for (const [pId, info] of Object.entries(e.providers || {})) {
+          if (!out[pId]) out[pId] = { label: PROVIDER_LABELS[pId] || pId, models: [] };
+          for (const m of info.models || []) {
+            if (!out[pId].models.includes(m)) out[pId].models.push(m);
+          }
+        }
+      }
+      return out;
+    }, [environments, session.clientName, session.env]);
 
     const showSlash = text.startsWith('/');
     const slashQuery = text.startsWith('/') ? text.slice(1).split(' ')[0] : '';
@@ -452,7 +469,7 @@
               </IconBtn>
 
               {/* Center: pickers */}
-              <ModelPicker provider={provider} model={model} theme={theme} variant={variant}
+              <ModelPicker provider={provider} model={model} theme={theme} variant={variant} providers={providers}
               onChange={(p, m) => {
                 setProvider(p); setModel(m);
                 if ((p !== session.provider || m !== session.model) && onSwitchModel) {

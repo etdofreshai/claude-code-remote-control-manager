@@ -75,6 +75,7 @@ function shape(agents) {
         status: mapStatus(s),
         provider: mapProvider(s.provider),
         model: s.model || '—',
+        effort: s.effort || 'medium',
         tokens: 0,
         cost: 0,
         updated: Date.parse(s.lastMessageAt || s.addedAt) || Date.now(),

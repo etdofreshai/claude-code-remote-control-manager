@@ -620,6 +620,7 @@
             density={tweaks.density}
             width={sidebarWidth}
             onNewSession={handleNewSession}
+            onRenameSession={(s, name) => actions?.onRenameSession?.(s, name)}
             onArchiveSession={(s) => actions?.onArchiveSession?.(s)}
             onDeleteSession={(s) => {
               const result = actions?.onDeleteSession?.(s);

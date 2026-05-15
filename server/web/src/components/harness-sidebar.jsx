@@ -3,7 +3,7 @@
 // and per-group "+" buttons to start a new session in that directory.
 
 (function () {
-  const { useState, useMemo } = React;
+  const { useState, useMemo, useEffect, useRef } = React;
 
   function fmtTime(ts) {
     const diff = Date.now() - ts;
@@ -105,9 +105,140 @@
     );
   }
 
-  function SessionRow({ session, active, onClick, theme, variant, density, onArchive, onDelete }) {
+  function MenuItem({ label, hint, onClick, theme, variant, danger }) {
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); onClick(); }}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          width: '100%', textAlign: 'left',
+          padding: '5px 8px', background: 'transparent', border: 'none',
+          cursor: 'pointer', borderRadius: variant.radiusSm,
+          fontSize: 11.5, color: theme.text,
+          fontFamily: variant.allMono ? variant.mono : 'inherit',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = theme.surfaceHover; e.currentTarget.style.color = danger ? theme.status.failed : theme.text; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = theme.text; }}
+      >
+        <span>{label}</span>
+        <span style={{
+          fontSize: 9.5, color: theme.textMuted, fontFamily: variant.mono,
+          padding: '0 4px', border: `1px solid ${theme.border}`, borderRadius: 3,
+        }}>{hint}</span>
+      </button>
+    );
+  }
+
+  // Compact-row context menu — a ⋮ button opening Rename / Archive / Delete.
+  // While the menu is open, R / A / D trigger the actions and Esc closes it.
+  // The popover is position:fixed so the sidebar's scroll container can't
+  // clip it; it flips above the button when there's no room below.
+  function RowMenu({ session, onRename, onArchive, onDelete, theme, variant, forceVisible }) {
+    const [open, setOpen] = useState(false);
+    const [pos, setPos] = useState(null);
+    const btnRef = useRef(null);
+
+    const close = () => setOpen(false);
+    const openMenu = () => {
+      const r = btnRef.current && btnRef.current.getBoundingClientRect();
+      if (r) {
+        const right = Math.max(8, window.innerWidth - r.right);
+        const MENU_H = 112;
+        if (r.bottom + 4 + MENU_H > window.innerHeight) {
+          setPos({ bottom: window.innerHeight - r.top + 4, right });
+        } else {
+          setPos({ top: r.bottom + 4, right });
+        }
+      }
+      setOpen(true);
+    };
+    const doRename = () => {
+      close();
+      if (!onRename) return;
+      const next = window.prompt('Rename session', session.title);
+      if (next != null && next.trim() && next.trim() !== session.title) onRename(session, next.trim());
+    };
+    const doArchive = () => { close(); onArchive && onArchive(session); };
+    const doDelete = () => {
+      close();
+      if (!onDelete) return;
+      if (window.confirm(`Delete "${session.title}"? This removes it from the server and the agent.`)) onDelete(session);
+    };
+
+    useEffect(() => {
+      if (!open) return;
+      // Closures capture the actions from this render; the menu is transient
+      // so any staleness across a poll is harmless (same session id).
+      const onKey = (e) => {
+        const k = (e.key || '').toLowerCase();
+        if (k === 'r') { e.preventDefault(); doRename(); }
+        else if (k === 'a') { e.preventDefault(); doArchive(); }
+        else if (k === 'd') { e.preventDefault(); doDelete(); }
+        else if (k === 'escape') { e.preventDefault(); close(); }
+      };
+      const dismiss = () => setOpen(false);
+      document.addEventListener('keydown', onKey);
+      window.addEventListener('scroll', dismiss, true);
+      window.addEventListener('resize', dismiss);
+      return () => {
+        document.removeEventListener('keydown', onKey);
+        window.removeEventListener('scroll', dismiss, true);
+        window.removeEventListener('resize', dismiss);
+      };
+    }, [open]);
+
+    return (
+      <div style={{ display: 'inline-flex', flexShrink: 0 }}>
+        <button
+          ref={btnRef}
+          title="Session actions"
+          onClick={(e) => { e.stopPropagation(); open ? close() : openMenu(); }}
+          style={{
+            background: open ? theme.surfaceHover : 'transparent',
+            border: 'none', padding: 3, borderRadius: 3,
+            color: open ? theme.text : theme.textMuted, cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center',
+            opacity: (forceVisible || open) ? 1 : 0,
+            transition: 'opacity .12s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = theme.surfaceHover; e.currentTarget.style.color = theme.text; }}
+          onMouseLeave={(e) => { if (!open) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = theme.textMuted; } }}
+        >
+          <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor">
+            <circle cx="7" cy="3" r="1.25" />
+            <circle cx="7" cy="7" r="1.25" />
+            <circle cx="7" cy="11" r="1.25" />
+          </svg>
+        </button>
+        {open && pos && (
+          <>
+            <div onClick={(e) => { e.stopPropagation(); close(); }}
+                 style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: 'fixed',
+                ...(pos.top != null ? { top: pos.top } : { bottom: pos.bottom }),
+                right: pos.right,
+                background: theme.surface2, border: `1px solid ${theme.borderStrong}`,
+                borderRadius: variant.radius, padding: 4, minWidth: 160,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.35)', zIndex: 61,
+              }}
+            >
+              <MenuItem label={variant.allMono ? 'rename' : 'Rename'} hint="R" onClick={doRename} theme={theme} variant={variant} />
+              <MenuItem label={variant.allMono ? 'archive' : 'Archive'} hint="A" onClick={doArchive} theme={theme} variant={variant} />
+              <MenuItem label={variant.allMono ? 'delete' : 'Delete'} hint="D" onClick={doDelete} theme={theme} variant={variant} danger />
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function SessionRow({ session, active, onClick, theme, variant, density, onRename, onArchive, onDelete }) {
     const compact = density === 'compact';
     const padY = compact ? 5 : 8;
+    const [hovered, setHovered] = useState(false);
 
     if (compact) {
       // One-line dense view: status · title · provider · time
@@ -124,8 +255,8 @@
             cursor: 'pointer',
             position: 'relative',
           }}
-          onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = theme.surfaceHover; }}
-          onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+          onMouseEnter={(e) => { setHovered(true); if (!active) e.currentTarget.style.background = theme.surfaceHover; }}
+          onMouseLeave={(e) => { setHovered(false); if (!active) e.currentTarget.style.background = 'transparent'; }}
         >
           <StatusDot status={session.status} theme={theme} />
           <window.ProviderIcon provider={session.provider} size={11} theme={theme} variant={variant} square />
@@ -142,6 +273,12 @@
             fontSize: 10, color: theme.textMuted, fontFamily: variant.mono,
             flexShrink: 0,
           }}>{fmtTime(session.updated)}</span>
+          <RowMenu
+            session={session}
+            onRename={onRename} onArchive={onArchive} onDelete={onDelete}
+            theme={theme} variant={variant}
+            forceVisible={hovered}
+          />
         </div>
       );
     }
@@ -361,7 +498,7 @@
     return <PickerPill label="sort" value={value} options={opts} onChange={onChange} theme={theme} variant={variant} hideLabel={hideLabel} />;
   }
 
-  function Sidebar({ sessions, activeId, onSelect, theme, variant, density, width, onNewSession, onArchiveSession, onDeleteSession }) {
+  function Sidebar({ sessions, activeId, onSelect, theme, variant, density, width, onNewSession, onRenameSession, onArchiveSession, onDeleteSession }) {
     const [groupBy, setGroupBy] = useState('cwd');
     const [sortBy, setSortBy] = useState('latest');
     const [collapsed, setCollapsed] = useState({});
@@ -600,6 +737,7 @@
                     active={s.id === activeId}
                     onClick={() => onSelect(s.id)}
                     theme={theme} variant={variant} density={density}
+                    onRename={onRenameSession}
                     onArchive={onArchiveSession}
                     onDelete={onDeleteSession}
                   />

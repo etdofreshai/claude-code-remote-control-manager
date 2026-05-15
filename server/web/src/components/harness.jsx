@@ -585,6 +585,36 @@
 
     useEffect(() => () => streamTimer.current && clearTimeout(streamTimer.current), []);
 
+    // Global keyboard shortcuts. Mod = Cmd on Mac, Ctrl elsewhere.
+    useEffect(() => {
+      function onKey(e) {
+        const mod = e.metaKey || e.ctrlKey;
+        if (!mod) return;
+        const target = e.target;
+        const inEditable = target && (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable
+        );
+        if (e.key === 'b' || e.key === 'B') {
+          e.preventDefault();
+          setTweak('sidebar', !tweaks.sidebar);
+        } else if (e.key === ',') {
+          e.preventDefault();
+          setScreen('settings');
+        } else if ((e.key === 'k' || e.key === 'K') && !inEditable) {
+          e.preventDefault();
+          const input = document.querySelector('aside input[placeholder*="earch sessions"], aside input[placeholder*="grep sessions"]');
+          if (input) input.focus();
+        } else if ((e.key === 'n' || e.key === 'N') && !inEditable) {
+          e.preventDefault();
+          setScreen('launcher');
+        }
+      }
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    }, [tweaks.sidebar, setTweak]);
+
     const sidebarWidth = tweaks.sidebar ? tweaks.density === 'compact' ? 250 : 270 : 0;
     const breadcrumb = screen === 'settings' ? 'Settings' : null;
     const showTopBar = true;

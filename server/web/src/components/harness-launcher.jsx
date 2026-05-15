@@ -459,9 +459,9 @@
     }
 
     // Aggregate providers/models across every connected client (same source
-    // as Settings → Providers). Falls back to an empty map if nothing's
-    // registered yet.
+    // as Settings → Providers), then filter by the user's enable toggles.
     const PROVIDER_LABELS = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' };
+    const enabledMap = window.HarnessEnabled.useEnabledMap();
     const providers = useMemo(() => {
       const byProvider = new Map();
       for (const e of environments) {
@@ -474,8 +474,8 @@
       for (const [pId, p] of byProvider.entries()) {
         out[pId] = { label: p.label, models: Array.from(p.models) };
       }
-      return out;
-    }, [environments]);
+      return window.HarnessEnabled.filterProviders(out, enabledMap);
+    }, [environments, enabledMap]);
 
     // Snap default provider/model to the first real one once data arrives,
     // and re-snap if the currently selected pair vanishes from the list.

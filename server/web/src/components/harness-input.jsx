@@ -367,7 +367,9 @@
 
     // Build the model picker list from the live client registration. Prefer
     // the environment matching this session's clientName; if none matches
-    // (mid-restart, say), aggregate across all known environments.
+    // (mid-restart, say), aggregate across all known environments. Then
+    // filter by the user's enable toggles from Settings → Providers.
+    const enabledMap = window.HarnessEnabled.useEnabledMap();
     const providers = useMemo(() => {
       const out = {};
       const envs = environments || [];
@@ -381,8 +383,8 @@
           }
         }
       }
-      return out;
-    }, [environments, session.clientName, session.env]);
+      return window.HarnessEnabled.filterProviders(out, enabledMap);
+    }, [environments, session.clientName, session.env, enabledMap]);
 
     const showSlash = text.startsWith('/');
     const slashQuery = text.startsWith('/') ? text.slice(1).split(' ')[0] : '';

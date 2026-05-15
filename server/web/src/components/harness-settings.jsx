@@ -147,10 +147,14 @@
 
   // ----- Sections -----
 
-  function ProvidersSection({ theme, variant, data }) {
+  function ProvidersSection({ theme, variant, data, actions }) {
+    const enabled = window.HarnessEnabled.useEnabledMap();
+    const [refreshing, setRefreshing] = useState(false);
+    const [refreshErr, setRefreshErr] = useState(null);
+
     // Aggregate provider/model lists across every connected environment.
-    // The actual provider config lives in each client's .env (PROVIDERS_JSON
-    // and per-provider tokens) - this view is read-only.
+    // The actual provider config still lives in each client's .env, but
+    // we now layer per-user enable toggles on top.
     const provs = useMemo(() => {
       const byProvider = new Map();
       for (const e of data?.environments ?? []) {
@@ -170,31 +174,79 @@
       }));
     }, [data]);
 
-    function ModelRow({ name }) {
+    function ModelRow({ providerId, name, providerOff }) {
+      const on = !providerOff && window.HarnessEnabled.isModelEnabled(enabled, providerId, name);
       return (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 10,
           padding: '7px 10px 7px 12px',
           borderTop: `1px solid ${theme.border}`,
+          opacity: providerOff ? 0.5 : 1,
         }}>
-          <window.Icons.Dot size={5} color={theme.accent} />
+          <window.Icons.Dot size={5} color={on ? theme.accent : theme.textMuted} />
           <span style={{
             fontSize: 12.5, color: theme.text,
             fontFamily: variant.mono, letterSpacing: 0,
+            flex: 1,
           }}>
             {name}
           </span>
+          <ToggleSwitch
+            value={on}
+            onChange={(v) => window.HarnessEnabled.setModel(providerId, name, v)}
+            theme={theme}
+          />
         </div>
       );
+    }
+
+    async function refreshModels() {
+      if (refreshing) return;
+      setRefreshing(true);
+      setRefreshErr(null);
+      try {
+        const r = await actions?.pollModels?.();
+        if (r && r.error) setRefreshErr(String(r.error));
+      } catch (err) {
+        setRefreshErr(err?.message || String(err));
+      } finally {
+        setRefreshing(false);
+      }
     }
 
     return (
       <>
         <SectionHeader
           title="Providers"
-          subtitle="Read-only view of providers and models advertised by connected clients. Edit each client's PROVIDERS_JSON and provider tokens in its .env to change this list."
+          subtitle="Models come from the live client registration. Toggle a whole provider or individual models to hide them from the pickers. Refresh asks a connected client to query upstream APIs for the current model list."
           theme={theme} variant={variant}
         />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <button
+            onClick={refreshModels}
+            disabled={refreshing || !actions?.pollModels}
+            title="Ask a connected client to query upstream APIs for the current model list"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: refreshing ? theme.surface2 : theme.accentSoft,
+              border: `1px solid ${theme.accentLine}`,
+              color: refreshing ? theme.textDim : theme.accent,
+              padding: '5px 10px', borderRadius: variant.radiusSm,
+              fontSize: 11.5, cursor: refreshing ? 'default' : 'pointer',
+              fontFamily: variant.allMono ? variant.mono : 'inherit',
+            }}
+          >
+            <window.Icons.Refresh size={11} />
+            {refreshing
+              ? (variant.allMono ? 'refreshing…' : 'Refreshing…')
+              : (variant.allMono ? 'refresh models' : 'Refresh models')}
+          </button>
+          {refreshErr && (
+            <span style={{ fontSize: 11, color: theme.status.failed, fontFamily: variant.mono }}>
+              {refreshErr}
+            </span>
+          )}
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {provs.length === 0 && (
             <div style={{
@@ -206,36 +258,51 @@
               No providers advertised yet. Connect a client to populate this list.
             </div>
           )}
-          {provs.map(p => (
-            <div key={p.id} style={{
-              border: `1px solid ${theme.border}`,
-              borderRadius: variant.radius,
-              background: theme.surface,
-              overflow: 'hidden',
-            }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '12px 14px',
+          {provs.map(p => {
+            const providerOn = window.HarnessEnabled.isProviderEnabled(enabled, p.id);
+            const enabledModelCount = p.models.filter((m) =>
+              window.HarnessEnabled.isModelEnabled(enabled, p.id, m)
+            ).length;
+            return (
+              <div key={p.id} style={{
+                border: `1px solid ${theme.border}`,
+                borderRadius: variant.radius,
+                background: theme.surface,
+                overflow: 'hidden',
+                opacity: providerOn ? 1 : 0.6,
+                transition: 'opacity .15s',
               }}>
-                <window.ProviderIcon provider={p.id} size={26} theme={theme} variant={variant} square />
-                <div style={{ flex: 1 }}>
-                  <div style={{
-                    fontSize: 13.5, fontWeight: 600, color: theme.text,
-                    letterSpacing: variant.letterSpacing,
-                    fontFamily: variant.allMono ? variant.mono : 'inherit',
-                  }}>{p.label}</div>
-                  <div style={{ fontSize: 10.5, color: theme.textMuted, fontFamily: variant.mono, marginTop: 2 }}>
-                    {p.models.length} model{p.models.length === 1 ? '' : 's'} | on {p.envs.join(', ')}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '12px 14px',
+                }}>
+                  <window.ProviderIcon provider={p.id} size={26} theme={theme} variant={variant} square />
+                  <div style={{ flex: 1 }}>
+                    <div style={{
+                      fontSize: 13.5, fontWeight: 600, color: theme.text,
+                      letterSpacing: variant.letterSpacing,
+                      fontFamily: variant.allMono ? variant.mono : 'inherit',
+                    }}>{p.label}</div>
+                    <div style={{ fontSize: 10.5, color: theme.textMuted, fontFamily: variant.mono, marginTop: 2 }}>
+                      {providerOn ? enabledModelCount : 0}/{p.models.length} models enabled · on {p.envs.join(', ')}
+                    </div>
                   </div>
+                  <ToggleSwitch
+                    value={providerOn}
+                    onChange={(v) => window.HarnessEnabled.setProvider(p.id, v)}
+                    theme={theme}
+                  />
                 </div>
+                {p.models.length > 0 && (
+                  <div>
+                    {p.models.map(m => (
+                      <ModelRow key={m} providerId={p.id} name={m} providerOff={!providerOn} />
+                    ))}
+                  </div>
+                )}
               </div>
-              {p.models.length > 0 && (
-                <div>
-                  {p.models.map(m => <ModelRow key={m} name={m} />)}
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </>
     );
@@ -690,7 +757,7 @@
     );
   }
 
-  function SettingsView({ theme, variant, tweaks, setTweak, onBack, data }) {
+  function SettingsView({ theme, variant, tweaks, setTweak, onBack, data, actions }) {
     const [section, setSection] = useState('providers');
     const nav = [
       { id: 'providers', label: 'Providers', icon: <window.Icons.Settings size={12} />,
@@ -744,7 +811,7 @@
         </nav>
         <div style={{ flex: 1, overflowY: 'auto', padding: '28px 32px', background: theme.bg }}>
           <div style={{ maxWidth: 640 }}>
-            {section === 'providers' && <ProvidersSection theme={theme} variant={variant} data={data} />}
+            {section === 'providers' && <ProvidersSection theme={theme} variant={variant} data={data} actions={actions} />}
             {section === 'environments' && <EnvironmentsSection theme={theme} variant={variant} data={data} />}
             {section === 'appearance' && <AppearanceSection theme={theme} variant={variant} tweaks={tweaks} setTweak={setTweak} />}
             {section === 'keyboard' && <KeyboardSection theme={theme} variant={variant} />}

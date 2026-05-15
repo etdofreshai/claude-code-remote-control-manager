@@ -774,6 +774,7 @@
             theme={theme} variant={variant}
             tweaks={tweaks} setTweak={setTweak}
             data={data}
+            actions={actions}
             onBack={() => setScreen(openSessions.length > 0 ? 'chat' : 'launcher')} />
           }
         </div>

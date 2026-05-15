@@ -118,9 +118,11 @@
     const opts = [
     { id: 'low', label: 'Low', hint: '4k', dot: theme.status.completed },
     { id: 'medium', label: 'Medium', hint: '16k', dot: theme.status.awaiting },
-    { id: 'high', label: 'High', hint: '64k', dot: theme.accent }];
+    { id: 'high', label: 'High', hint: '64k', dot: theme.accent },
+    { id: 'xhigh', label: 'X-High', hint: '128k', dot: theme.accent },
+    { id: 'max', label: 'Max', hint: '256k', dot: theme.accent }];
 
-    const cur = opts.find((o) => o.id === value);
+    const cur = opts.find((o) => o.id === value) || opts[1];
     return (
       <div style={{ position: 'relative' }}>
         <Pill active={open} onClick={() => setOpen(!open)} theme={theme} variant={variant}>
@@ -354,12 +356,16 @@
     const [text, setText] = useState('');
     const [provider, setProvider] = useState(session.provider);
     const [model, setModel] = useState(session.model);
-    const [budget, setBudget] = useState('medium');
+    const [effort, setEffort] = useState(session.effort || 'medium');
     const [voice, setVoice] = useState(false);
     const taRef = useRef(null);
 
-    // Sync model with session when switching
-    useEffect(() => {setProvider(session.provider);setModel(session.model);}, [session.id]);
+    // Sync provider/model/effort with the session when it changes.
+    useEffect(() => {
+      setProvider(session.provider);
+      setModel(session.model);
+      setEffort(session.effort || 'medium');
+    }, [session.id]);
 
     const showSlash = text.startsWith('/');
     const slashQuery = text.startsWith('/') ? text.slice(1).split(' ')[0] : '';
@@ -450,10 +456,13 @@
               onChange={(p, m) => {
                 setProvider(p); setModel(m);
                 if ((p !== session.provider || m !== session.model) && onSwitchModel) {
-                  onSwitchModel(p, m);
+                  onSwitchModel(p, m, effort);
                 }
               }} />
-              <BudgetPicker value={budget} onChange={setBudget} theme={theme} variant={variant} />
+              <BudgetPicker value={effort} onChange={(e) => {
+                setEffort(e);
+                if (e !== session.effort && onSwitchModel) onSwitchModel(provider, model, e);
+              }} theme={theme} variant={variant} />
               <Pill theme={theme} variant={variant} onClick={() => setText('/')}>
                 <window.Icons.Slash size={12} />
                 <span style={{ color: theme.textMuted }}>commands</span>

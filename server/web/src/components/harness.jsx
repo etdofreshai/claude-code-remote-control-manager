@@ -529,9 +529,9 @@
         .catch((err) => console.error('delete failed', err));
     }
 
-    function handleSwitchModel(provider, model) {
+    function handleSwitchModel(provider, model, effort) {
       if (!session) return;
-      Promise.resolve(actions?.onSwitchModel?.(session, provider, model)).catch((err) => console.error('switch failed', err));
+      Promise.resolve(actions?.onSwitchModel?.(session, provider, model, effort)).catch((err) => console.error('switch failed', err));
     }
 
     function handleNewSession() {setScreen('launcher');}

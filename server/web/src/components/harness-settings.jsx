@@ -3,7 +3,7 @@
 // Tools, Keyboard shortcuts, MCP servers, About.
 
 (function () {
-  const { useState } = React;
+  const { useState, useMemo, useEffect } = React;
 
   function NavItem({ active, onClick, theme, variant, icon, label, count }) {
     return (
@@ -145,97 +145,45 @@
     );
   }
 
-  // ─────────── Sections ───────────
+  // ----- Sections -----
 
-  function ProvidersSection({ theme, variant }) {
-    const [provs, setProvs] = useState([
-      { id: 'claude', label: 'Anthropic', enabled: true,
-        models: [
-          { name: 'haiku', on: true, hint: 'Fast' },
-          { name: 'sonnet', on: true, hint: 'Balanced' },
-          { name: 'opus', on: true, hint: 'Max' },
-        ], custom: [] },
-      { id: 'codex', label: 'OpenAI', enabled: true,
-        models: [
-          { name: 'gpt-5.5', on: true, hint: 'General' },
-        ], custom: [] },
-      { id: 'gemini', label: 'Google', enabled: false,
-        models: [
-          { name: 'pro-3-1-preview', on: true, hint: 'Long ctx' },
-        ], custom: [] },
-    ]);
-    const [addingFor, setAddingFor] = useState(null);
-    const [draft, setDraft] = useState('');
-
-    function setProvEnabled(id, on) {
-      setProvs(provs.map(p => p.id === id ? { ...p, enabled: on } : p));
-    }
-    function setModelOn(pId, name, on) {
-      setProvs(provs.map(p => p.id === pId ? {
+  function ProvidersSection({ theme, variant, data }) {
+    // Aggregate provider/model lists across every connected environment.
+    // The actual provider config lives in each client's .env (PROVIDERS_JSON
+    // and per-provider tokens) - this view is read-only.
+    const provs = useMemo(() => {
+      const byProvider = new Map();
+      for (const e of data?.environments ?? []) {
+        for (const [pId, info] of Object.entries(e.providers || {})) {
+          if (!byProvider.has(pId)) {
+            byProvider.set(pId, { id: pId, label: pId, models: new Set(), envs: new Set() });
+          }
+          const entry = byProvider.get(pId);
+          entry.envs.add(e.name);
+          for (const m of info.models || []) entry.models.add(m);
+        }
+      }
+      return Array.from(byProvider.values()).map(p => ({
         ...p,
-        models: p.models.map(m => m.name === name ? { ...m, on } : m),
-        custom: p.custom.map(m => m.name === name ? { ...m, on } : m),
-      } : p));
-    }
-    function addCustom(pId) {
-      if (!draft.trim()) { setAddingFor(null); return; }
-      setProvs(provs.map(p => p.id === pId ? {
-        ...p,
-        custom: [...p.custom, { name: draft.trim(), on: true, custom: true }],
-      } : p));
-      setDraft('');
-      setAddingFor(null);
-    }
-    function removeCustom(pId, name) {
-      setProvs(provs.map(p => p.id === pId ? {
-        ...p, custom: p.custom.filter(m => m.name !== name),
-      } : p));
-    }
+        models: Array.from(p.models),
+        envs: Array.from(p.envs),
+      }));
+    }, [data]);
 
-    function ModelRow({ pId, m, isCustom }) {
+    function ModelRow({ name }) {
       return (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 10,
           padding: '7px 10px 7px 12px',
           borderTop: `1px solid ${theme.border}`,
         }}>
-          <window.Icons.Dot size={5} color={m.on ? theme.accent : theme.textMuted} />
+          <window.Icons.Dot size={5} color={theme.accent} />
           <span style={{
             fontSize: 12.5, color: theme.text,
             fontFamily: variant.mono, letterSpacing: 0,
           }}>
-            {m.name}
+            {name}
           </span>
-          {isCustom && (
-            <span style={{
-              fontSize: 9.5, color: theme.textMuted, fontFamily: variant.mono,
-              padding: '1px 5px', border: `1px solid ${theme.border}`, borderRadius: 3,
-              textTransform: 'uppercase', letterSpacing: '0.05em',
-            }}>custom</span>
-          )}
-          {m.hint && !isCustom && (
-            <span style={{ fontSize: 10.5, color: theme.textMuted, fontFamily: variant.mono }}>
-              {m.hint}
-            </span>
-          )}
-          <div style={{ flex: 1 }} />
-          {isCustom && (
-            <button
-              onClick={() => removeCustom(pId, m.name)}
-              title="Remove custom model"
-              style={{
-                background: 'transparent', border: 'none',
-                color: theme.textMuted, cursor: 'pointer',
-                padding: 3, borderRadius: 3,
-                display: 'inline-flex',
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.color = theme.status.failed}
-              onMouseLeave={(e) => e.currentTarget.style.color = theme.textMuted}
-            >
-              <window.Icons.X size={11} />
-            </button>
-          )}
-          <ToggleSwitch value={m.on} onChange={(v) => setModelOn(pId, m.name, v)} theme={theme} />
         </div>
       );
     }
@@ -244,109 +192,50 @@
       <>
         <SectionHeader
           title="Providers"
-          subtitle="Toggle which providers are available, and which models show up in the picker."
+          subtitle="Read-only view of providers and models advertised by connected clients. Edit each client's PROVIDERS_JSON and provider tokens in its .env to change this list."
           theme={theme} variant={variant}
         />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {provs.map(p => {
-            const allModels = [...p.models, ...p.custom];
-            return (
-              <div key={p.id} style={{
-                border: `1px solid ${theme.border}`,
-                borderRadius: variant.radius,
-                background: theme.surface,
-                opacity: p.enabled ? 1 : 0.6,
-                transition: 'opacity .15s',
-                overflow: 'hidden',
+          {provs.length === 0 && (
+            <div style={{
+              border: `1px dashed ${theme.borderStrong}`,
+              borderRadius: variant.radius,
+              padding: '20px 16px', textAlign: 'center',
+              color: theme.textDim, fontSize: 12.5,
+            }}>
+              No providers advertised yet. Connect a client to populate this list.
+            </div>
+          )}
+          {provs.map(p => (
+            <div key={p.id} style={{
+              border: `1px solid ${theme.border}`,
+              borderRadius: variant.radius,
+              background: theme.surface,
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '12px 14px',
               }}>
-                {/* Provider header */}
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  padding: '12px 14px',
-                }}>
-                  <window.ProviderIcon provider={p.id} size={26} theme={theme} variant={variant} square />
-                  <div style={{ flex: 1 }}>
-                    <div style={{
-                      fontSize: 13.5, fontWeight: 600, color: theme.text,
-                      letterSpacing: variant.letterSpacing,
-                      fontFamily: variant.allMono ? variant.mono : 'inherit',
-                    }}>{p.label}</div>
-                    <div style={{ fontSize: 10.5, color: theme.textMuted, fontFamily: variant.mono, marginTop: 2 }}>
-                      {allModels.filter(m => m.on).length}/{allModels.length} models enabled
-                    </div>
+                <window.ProviderIcon provider={p.id} size={26} theme={theme} variant={variant} square />
+                <div style={{ flex: 1 }}>
+                  <div style={{
+                    fontSize: 13.5, fontWeight: 600, color: theme.text,
+                    letterSpacing: variant.letterSpacing,
+                    fontFamily: variant.allMono ? variant.mono : 'inherit',
+                  }}>{p.label}</div>
+                  <div style={{ fontSize: 10.5, color: theme.textMuted, fontFamily: variant.mono, marginTop: 2 }}>
+                    {p.models.length} model{p.models.length === 1 ? '' : 's'} | on {p.envs.join(', ')}
                   </div>
-                  <ToggleSwitch value={p.enabled} onChange={(v) => setProvEnabled(p.id, v)} theme={theme} />
                 </div>
-
-                {/* Models list — only shown when provider is enabled */}
-                {p.enabled && (
-                  <div>
-                    {p.models.map(m => <ModelRow key={m.name} pId={p.id} m={m} />)}
-                    {p.custom.map(m => <ModelRow key={m.name} pId={p.id} m={m} isCustom />)}
-
-                    {/* Add custom model */}
-                    <div style={{
-                      borderTop: `1px solid ${theme.border}`,
-                      padding: '8px 10px',
-                    }}>
-                      {addingFor === p.id ? (
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          <input
-                            value={draft}
-                            onChange={(e) => setDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') addCustom(p.id);
-                              if (e.key === 'Escape') { setAddingFor(null); setDraft(''); }
-                            }}
-                            autoFocus
-                            placeholder={`e.g. ${p.id}-3.5-preview`}
-                            style={{
-                              flex: 1,
-                              background: theme.surface2,
-                              border: `1px solid ${theme.accentLine}`,
-                              borderRadius: variant.radiusSm,
-                              color: theme.text, padding: '5px 8px',
-                              fontSize: 12, fontFamily: variant.mono, outline: 'none',
-                            }}
-                          />
-                          <button onClick={() => addCustom(p.id)} style={{
-                            background: theme.accent, color: theme.accentText,
-                            border: `1px solid ${theme.accent}`,
-                            padding: '5px 10px', borderRadius: variant.radiusSm,
-                            fontSize: 11.5, cursor: 'pointer',
-                            fontFamily: variant.allMono ? variant.mono : 'inherit',
-                          }}>Add</button>
-                          <button onClick={() => { setAddingFor(null); setDraft(''); }} style={{
-                            background: 'transparent', color: theme.textDim,
-                            border: `1px solid ${theme.border}`,
-                            padding: '5px 9px', borderRadius: variant.radiusSm,
-                            fontSize: 11.5, cursor: 'pointer',
-                            fontFamily: variant.allMono ? variant.mono : 'inherit',
-                          }}>Cancel</button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setAddingFor(p.id)}
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 5,
-                            background: 'transparent', border: 'none',
-                            color: theme.textDim, padding: '3px 4px',
-                            fontSize: 11.5, cursor: 'pointer',
-                            fontFamily: variant.allMono ? variant.mono : 'inherit',
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.color = theme.accent}
-                          onMouseLeave={(e) => e.currentTarget.style.color = theme.textDim}
-                        >
-                          <window.Icons.Plus size={11} />
-                          {variant.allMono ? 'add custom model' : 'Add custom model'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
-            );
-          })}
+              {p.models.length > 0 && (
+                <div>
+                  {p.models.map(m => <ModelRow key={m} name={m} />)}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </>
     );
@@ -380,7 +269,7 @@
           </div>
         </SettingRow>
 
-        <SettingRow label="Visual variant" hint="Try a different aesthetic — same product, three personalities." theme={theme} variant={variant}>
+        <SettingRow label="Visual variant" hint="Try a different aesthetic - same product, three personalities." theme={theme} variant={variant}>
           <div style={{ display: 'flex', gap: 8 }}>
             {['Eclipse', 'Ember', 'Console'].map(v => {
               const active = tweaks.variant === v;
@@ -506,25 +395,19 @@
   }
 
   function KeyboardSection({ theme, variant }) {
+    const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || '');
+    const mod = isMac ? 'Cmd+' : 'Ctrl+';
     const shortcuts = [
       ['Navigate', [
-        ['⌘K', 'Quick switcher / search'],
-        ['⌘N', 'New session'],
-        ['⌘⇧N', 'Fork current session'],
-        ['⌘,', 'Open settings'],
-        ['⌘B', 'Toggle sidebar'],
+        [mod + 'K', 'Focus session search'],
+        [mod + 'N', 'New session'],
+        [mod + ',', 'Open settings'],
+        [mod + 'B', 'Toggle sidebar'],
       ]],
       ['Session', [
-        ['⏎', 'Send message'],
-        ['⇧⏎', 'New line'],
-        ['Esc', 'Stop current response'],
-        ['⌘L', 'Clear context'],
+        ['Enter', 'Send message'],
+        ['Shift+Enter', 'New line'],
         ['/', 'Open slash commands'],
-      ]],
-      ['Editing', [
-        ['⌘⇧K', 'Kill process'],
-        ['⌘⇧R', 'Re-run last tool'],
-        ['⌘E', 'Edit last message'],
       ]],
     ];
     return (
@@ -613,7 +496,7 @@
               </div>
               {s.error && (
                 <div style={{ fontSize: 11, color: theme.status.failed, marginTop: 6, fontFamily: variant.mono }}>
-                  ⚠ {s.error}
+                  ! {s.error}
                 </div>
               )}
             </div>
@@ -657,7 +540,7 @@
                 fontFamily: variant.allMono ? variant.mono : 'inherit',
               }}>Harness</div>
               <div style={{ fontSize: 11.5, color: theme.textMuted, fontFamily: variant.mono }}>
-                v0.1.0 · build 2026.05.13
+                v0.1.0 . build 2026.05.13
               </div>
             </div>
           </div>
@@ -747,7 +630,7 @@
                     {state}
                   </span>
                   <span style={{ fontSize: 10.5, color: theme.textMuted, fontFamily: variant.mono }}>
-                    {e.connected ? `connected · ${fmtAgo(e.connectedAt)}` : `last seen ${fmtAgo(e.connectedAt)}`}
+                    {e.connected ? `connected . ${fmtAgo(e.connectedAt)}` : `last seen ${fmtAgo(e.connectedAt)}`}
                   </span>
                   <div style={{ flex: 1 }} />
                   {isDisconnected ? (
@@ -765,293 +648,38 @@
                   )}
                 </div>
                 <div style={{
-                  display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
+                  display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)',
                   gap: 8, fontFamily: variant.mono, fontSize: 10.5,
                   paddingTop: 8, borderTop: `1px solid ${theme.border}`,
                 }}>
                   <Cell label="Host" value={e.host} theme={theme} />
                   <Cell label="OS" value={e.os} theme={theme} />
-                  <Cell label="CPU" value={e.cpu} theme={theme} />
-                  <Cell label="Memory" value={e.mem} theme={theme} />
                 </div>
               </div>
             );
           })}
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
             background: theme.surface2,
             border: `1px solid ${theme.border}`,
             borderRadius: variant.radius,
             padding: '12px 14px',
+            fontSize: 11.5, color: theme.textDim,
+            letterSpacing: variant.letterSpacing,
+            lineHeight: 1.55,
           }}>
-            <div style={{
-              width: 28, height: 28, borderRadius: variant.radiusSm,
-              background: theme.surface, color: theme.accent,
-              border: `1px solid ${theme.accentLine}`,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0,
-            }}>
-              <window.Icons.Server size={14} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontSize: 12.5, color: theme.text, fontWeight: 500,
-                letterSpacing: variant.letterSpacing,
-                fontFamily: variant.allMono ? variant.mono : 'inherit',
-              }}>Connect a new host</div>
-              <div style={{ fontSize: 11, color: theme.textMuted, marginTop: 1 }}>
-                Run this on the host you want to register:
-              </div>
-            </div>
+            Hosts register by running the <code style={{ fontFamily: variant.mono, color: theme.text }}>ccrcm</code> client
+            against this server. Configure <code style={{ fontFamily: variant.mono, color: theme.text }}>SERVER_URL</code>,
+            <code style={{ fontFamily: variant.mono, color: theme.text }}> CLIENT_TOKEN</code>, and
+            <code style={{ fontFamily: variant.mono, color: theme.text }}> AGENT_NAME</code> in the client's
+            <code style={{ fontFamily: variant.mono, color: theme.text }}> .env</code>, then run
+            <code style={{ fontFamily: variant.mono, color: theme.text }}> npm run dev</code> (or the built binary).
+            New clients show up here automatically once they register.
           </div>
-          <pre style={{
-            margin: 0,
-            background: theme.surface2,
-            border: `1px solid ${theme.border}`,
-            borderRadius: variant.radiusSm,
-            padding: '10px 12px',
-            fontFamily: variant.mono, fontSize: 11.5,
-            color: theme.text, overflowX: 'auto',
-          }}>
-            <span style={{ color: theme.textMuted }}>$ </span>
-            curl -fsSL https://harness.dev/install | sh && harness connect --server https://your.harness.app --token &lt;your-token&gt;
-          </pre>
-
-          {/* Access tokens for inbound client connections */}
-          <ApiTokens theme={theme} variant={variant} />
         </div>
       </>
     );
   }
 
-  function ApiTokens({ theme, variant }) {
-    const [tokens, setTokens] = useState([
-      { id: 't1', name: 'staging-vm', masked: 'hrn_•••••••••••••••YQ4z', created: '2026-04-12', lastUsed: '14m ago' },
-      { id: 't2', name: 'mac-mini',   masked: 'hrn_•••••••••••••••K8nP', created: '2026-03-30', lastUsed: '3d ago' },
-      { id: 't3', name: 'laptop',     masked: 'hrn_•••••••••••••••f29B', created: '2026-05-01', lastUsed: 'never' },
-    ]);
-    const [creating, setCreating] = useState(false);
-    const [draftName, setDraftName] = useState('');
-    const [newToken, setNewToken] = useState(null); // {name, value} after creation
-    const [copied, setCopied] = useState(false);
-
-    function genToken() {
-      const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-      let s = 'hrn_';
-      for (let i = 0; i < 32; i++) s += chars[Math.floor(Math.random() * chars.length)];
-      return s;
-    }
-    function create() {
-      const name = draftName.trim();
-      if (!name) return;
-      const value = genToken();
-      setNewToken({ name, value });
-      setTokens([...tokens, {
-        id: 't' + Date.now(),
-        name, masked: 'hrn_•••••••••••••••' + value.slice(-4),
-        created: new Date().toISOString().slice(0, 10),
-        lastUsed: 'never',
-      }]);
-      setDraftName('');
-      setCreating(false);
-    }
-    function copyNew() {
-      try { navigator.clipboard && navigator.clipboard.writeText(newToken.value); } catch {}
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }
-    function revoke(id) {
-      setTokens(tokens.filter(t => t.id !== id));
-    }
-
-    return (
-      <div style={{ marginTop: 22 }}>
-        <div style={{
-          fontSize: 10.5, color: theme.textDim, fontWeight: 600,
-          textTransform: variant.allMono ? 'none' : 'uppercase',
-          letterSpacing: variant.allMono ? 0 : '0.06em',
-          fontFamily: variant.allMono ? variant.mono : 'inherit',
-          marginBottom: 6,
-        }}>
-          {variant.allMono ? '# access tokens' : 'Access tokens'}
-        </div>
-        <div style={{ fontSize: 11.5, color: theme.textMuted, marginBottom: 10, lineHeight: 1.5 }}>
-          Clients pass <code style={{ fontFamily: variant.mono, color: theme.textDim }}>--token</code> when running <code style={{ fontFamily: variant.mono, color: theme.textDim }}>harness connect</code>. Tokens are shown once at creation — store them somewhere safe.
-        </div>
-
-        {/* Just-created token reveal */}
-        {newToken && (
-          <div style={{
-            border: `1px solid ${theme.accentLine}`,
-            background: theme.accentSoft,
-            borderRadius: variant.radius,
-            padding: '12px 14px', marginBottom: 12,
-          }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              marginBottom: 6,
-            }}>
-              <div style={{
-                fontSize: 12, color: theme.text, fontWeight: 500,
-                fontFamily: variant.allMono ? variant.mono : 'inherit',
-              }}>
-                Token created for "{newToken.name}"
-              </div>
-              <button onClick={() => setNewToken(null)} style={{
-                background: 'transparent', border: 'none',
-                color: theme.textDim, padding: 2, cursor: 'pointer',
-                display: 'inline-flex',
-              }}>
-                <window.Icons.X size={11} />
-              </button>
-            </div>
-            <div style={{
-              fontSize: 11, color: theme.textDim, marginBottom: 8,
-            }}>
-              Copy this now — it won't be shown again.
-            </div>
-            <div style={{
-              display: 'flex', gap: 6, alignItems: 'center',
-              background: theme.surface,
-              border: `1px solid ${theme.border}`,
-              borderRadius: variant.radiusSm,
-              padding: '6px 10px',
-            }}>
-              <code style={{
-                flex: 1, fontFamily: variant.mono, fontSize: 12,
-                color: theme.text, overflowX: 'auto', whiteSpace: 'nowrap',
-              }}>{newToken.value}</code>
-              <button onClick={copyNew} style={{
-                background: copied ? theme.accent : 'transparent',
-                color: copied ? theme.accentText : theme.textDim,
-                border: `1px solid ${copied ? theme.accent : theme.border}`,
-                padding: '3px 9px', borderRadius: variant.radiusSm,
-                fontSize: 11, cursor: 'pointer',
-                fontFamily: variant.allMono ? variant.mono : 'inherit',
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                flexShrink: 0,
-              }}>
-                {copied ? <window.Icons.Check size={10} /> : <window.Icons.Copy size={10} />}
-                {copied ? 'Copied' : 'Copy'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Token list */}
-        <div style={{
-          border: `1px solid ${theme.border}`,
-          borderRadius: variant.radius,
-          background: theme.surface,
-          overflow: 'hidden',
-        }}>
-          {tokens.length === 0 && (
-            <div style={{
-              padding: '14px', textAlign: 'center',
-              color: theme.textMuted, fontSize: 11.5,
-            }}>
-              No tokens yet.
-            </div>
-          )}
-          {tokens.map((t, i) => (
-            <div key={t.id} style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              padding: '10px 14px',
-              borderTop: i === 0 ? 'none' : `1px solid ${theme.border}`,
-            }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  fontSize: 12.5, color: theme.text, fontWeight: 500,
-                  letterSpacing: variant.letterSpacing,
-                  fontFamily: variant.allMono ? variant.mono : 'inherit',
-                }}>{t.name}</div>
-                <div style={{
-                  fontSize: 10.5, color: theme.textMuted,
-                  fontFamily: variant.mono, marginTop: 2,
-                  display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-                }}>
-                  <span>{t.masked}</span>
-                  <span>·</span>
-                  <span>created {t.created}</span>
-                  <span>·</span>
-                  <span>last used {t.lastUsed}</span>
-                </div>
-              </div>
-              <button
-                onClick={() => revoke(t.id)}
-                title="Revoke token"
-                style={{
-                  background: 'transparent', border: `1px solid ${theme.border}`,
-                  color: theme.textDim, padding: '4px 9px',
-                  borderRadius: variant.radiusSm, fontSize: 11, cursor: 'pointer',
-                  fontFamily: variant.allMono ? variant.mono : 'inherit',
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = theme.status.failed; e.currentTarget.style.borderColor = `${theme.status.failed}55`; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = theme.textDim; e.currentTarget.style.borderColor = theme.border; }}
-              >
-                Revoke
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {/* Add token */}
-        {creating ? (
-          <div style={{
-            display: 'flex', gap: 6, marginTop: 8,
-            padding: '6px',
-            background: theme.surface2,
-            border: `1px solid ${theme.borderStrong}`,
-            borderRadius: variant.radius,
-          }}>
-            <input
-              autoFocus
-              value={draftName}
-              onChange={(e) => setDraftName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') create();
-                if (e.key === 'Escape') { setCreating(false); setDraftName(''); }
-              }}
-              placeholder="Token name (e.g. ci-runner)"
-              style={{
-                flex: 1, background: 'transparent', border: 'none', outline: 'none',
-                color: theme.text, fontSize: 12, fontFamily: variant.mono,
-                padding: '4px 8px',
-              }}
-            />
-            <button onClick={create} style={{
-              background: theme.accent, color: theme.accentText,
-              border: 'none', borderRadius: variant.radiusSm, padding: '4px 11px',
-              fontSize: 11.5, cursor: 'pointer',
-              fontFamily: variant.allMono ? variant.mono : 'inherit',
-            }}>Generate</button>
-            <button onClick={() => { setCreating(false); setDraftName(''); }} style={{
-              background: 'transparent', color: theme.textDim,
-              border: 'none', padding: '4px 8px',
-              fontSize: 11.5, cursor: 'pointer',
-              fontFamily: variant.allMono ? variant.mono : 'inherit',
-            }}>Cancel</button>
-          </div>
-        ) : (
-          <button onClick={() => setCreating(true)} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5,
-            background: 'transparent', border: `1px dashed ${theme.border}`,
-            color: theme.textDim, padding: '7px 12px',
-            borderRadius: variant.radiusSm, fontSize: 11.5,
-            cursor: 'pointer', marginTop: 8,
-            fontFamily: variant.allMono ? variant.mono : 'inherit',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = theme.text; e.currentTarget.style.borderColor = theme.borderStrong; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = theme.textDim; e.currentTarget.style.borderColor = theme.border; }}
-          >
-            <window.Icons.Plus size={11} />
-            {variant.allMono ? 'create access token' : 'Create access token'}
-          </button>
-        )}
-      </div>
-    );
-  }
 
   function Cell({ label, value, theme }) {
     return (
@@ -1065,7 +693,8 @@
   function SettingsView({ theme, variant, tweaks, setTweak, onBack, data }) {
     const [section, setSection] = useState('providers');
     const nav = [
-      { id: 'providers', label: 'Providers', icon: <window.Icons.Settings size={12} />, count: 3 },
+      { id: 'providers', label: 'Providers', icon: <window.Icons.Settings size={12} />,
+        count: new Set((data?.environments || []).flatMap(e => Object.keys(e.providers || {}))).size || undefined },
       { id: 'environments', label: 'Environments', icon: <window.Icons.Server size={12} />, count: (data && data.environments ? data.environments.length : 0) },
       { id: 'appearance', label: 'Appearance', icon: <window.Icons.Sun size={12} /> },
       { id: 'keyboard', label: 'Keyboard', icon: <window.Icons.Lightning size={12} /> },
@@ -1115,7 +744,7 @@
         </nav>
         <div style={{ flex: 1, overflowY: 'auto', padding: '28px 32px', background: theme.bg }}>
           <div style={{ maxWidth: 640 }}>
-            {section === 'providers' && <ProvidersSection theme={theme} variant={variant} />}
+            {section === 'providers' && <ProvidersSection theme={theme} variant={variant} data={data} />}
             {section === 'environments' && <EnvironmentsSection theme={theme} variant={variant} data={data} />}
             {section === 'appearance' && <AppearanceSection theme={theme} variant={variant} tweaks={tweaks} setTweak={setTweak} />}
             {section === 'keyboard' && <KeyboardSection theme={theme} variant={variant} />}

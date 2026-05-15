@@ -1,7 +1,7 @@
 // Top bar + main Harness frame with screen routing.
 
 (function () {
-  const { useState, useEffect, useRef } = React;
+  const { useState, useEffect, useRef, useMemo } = React;
 
   function TopBarIconBtn({ onClick, title, theme, variant, active, badge, children }) {
     return (
@@ -420,55 +420,43 @@
 
   }
 
-  function Harness({ tweaks, setTweak, data, actions }) {
-    const variantName = tweaks.variant || 'Eclipse';
-    const variant = window.HARNESS_THEMES[variantName] || window.HARNESS_THEMES.Eclipse;
-    const theme = tweaks.dark ? variant.dark : variant.light;
-
-    const [activeId, setActiveId] = useState(data.activeSessionId);
-    const [screen, setScreen] = useState(data.sessions.length === 0 ? 'launcher' : 'launcher'); // 'chat' | 'launcher' | 'settings'
-    const [localMessages, setLocalMessages] = useState({});
+  // ChatPane: self-contained chat view for one session. Owns its own
+  // transcript poll, optimistic-message buffer, streaming state, and the
+  // per-session action handlers. This lets Harness render N panes
+  // side-by-side without sharing state between them.
+  function ChatPane({ session, theme, variant, tweaks, environments, gitRepos, actions, onAfterDelete, onClose, showClose }) {
+    const [localMessages, setLocalMessages] = useState([]);
     const [streaming, setStreaming] = useState(false);
     const streamTimer = useRef(null);
 
-    const session = data.sessions.find((s) => s.id === activeId) || data.sessions[0];
-
-    // Real transcript replicated from the agent (paginated, role-filterable,
-    // searchable). Falls back to an empty list if no session is selected or
-    // nothing has been pushed yet — the UI then just shows the optimistic
-    // local echo for in-flight sends.
     const transcript = window.useTranscript(session?.clientName ?? null, session?.sessionId ?? null);
     const baseMessages = (transcript.messages || []).map((m) => ({
       ...m,
-      // The chat renderer keys timestamps off `time` (epoch ms); transcripts
-      // store ISO strings in `ts`. Translate.
       time: typeof m.time === 'number' ? m.time : Date.parse(m.ts) || Date.now(),
     }));
 
-    // Once the server transcript grows, the agent has replicated whatever
-    // we echoed locally — drop the optimistic copy to avoid duplicates.
-    const lastTotalRef = useRef(0);
-    useEffect(() => {
-      if (!session) return;
-      if (transcript.total > lastTotalRef.current) {
-        lastTotalRef.current = transcript.total;
-        setLocalMessages((prev) => {
-          if (!prev[session.id] || prev[session.id].length === 0) return prev;
-          const { [session.id]: _, ...rest } = prev;
-          return rest;
-        });
-      }
-    }, [transcript.total, session?.id]);
-
-    const extras = session ? (localMessages[session.id] || []) : [];
+    // Drop optimistic local copies that already appear in the server
+    // transcript (same role + trimmed text).
+    const baseKeys = new Set(
+      baseMessages
+        .filter((m) => m && (m.kind === 'text' || m.kind === 'system'))
+        .map((m) => `${m.role}|${(m.text || '').trim()}`),
+    );
+    const extras = localMessages.filter((m) => !baseKeys.has(`${m.role}|${(m.text || '').trim()}`));
     const messages = [...baseMessages, ...extras];
 
+    // Garbage-collect once every optimistic copy has a counterpart.
+    useEffect(() => {
+      if (!localMessages.length) return;
+      if (localMessages.every((m) => baseKeys.has(`${m.role}|${(m.text || '').trim()}`))) {
+        setLocalMessages([]);
+      }
+    }, [baseMessages, localMessages]);
+
+    useEffect(() => () => streamTimer.current && clearTimeout(streamTimer.current), []);
+
     function appendOptimistic(text, role = 'user') {
-      if (!session) return;
-      setLocalMessages((prev) => {
-        const cur = prev[session.id] || [];
-        return { ...prev, [session.id]: [...cur, { role, time: Date.now(), kind: 'text', text }] };
-      });
+      setLocalMessages((prev) => [...prev, { role, time: Date.now(), kind: 'text', text }]);
     }
 
     function handleSend(text) {
@@ -483,63 +471,142 @@
         setStreaming(false);
       });
     }
-
     function handleStop() {
       setStreaming(false);
       if (streamTimer.current) clearTimeout(streamTimer.current);
-      if (session) Promise.resolve(actions?.onStop?.(session)).catch((err) => console.error('stop failed', err));
+      Promise.resolve(actions?.onStop?.(session)).catch((err) => console.error('stop failed', err));
     }
-
     function handleSteer(text) {
-      if (!session || !text) return;
+      if (!text) return;
       appendOptimistic('↪ Steer: ' + text, 'user');
       Promise.resolve(actions?.onSteer?.(session, text)).catch((err) => console.error('steer failed', err));
     }
-
-    function handleKill() {
-      if (!session) return;
-      Promise.resolve(actions?.onKill?.(session)).catch((err) => console.error('kill failed', err));
-    }
-
-    function handleRevive() {
-      if (!session) return;
-      Promise.resolve(actions?.onRevive?.(session)).catch((err) => console.error('revive failed', err));
-    }
-
-    function handleRename(name) {
-      if (!session || !name) return;
-      Promise.resolve(actions?.onRenameSession?.(session, name)).catch((err) => console.error('rename failed', err));
-    }
-
-    function handleArchive() {
-      if (!session) return;
-      Promise.resolve(actions?.onArchiveSession?.(session)).catch((err) => console.error('archive failed', err));
-    }
-
+    function handleKill() { Promise.resolve(actions?.onKill?.(session)).catch((err) => console.error('kill failed', err)); }
+    function handleRevive() { Promise.resolve(actions?.onRevive?.(session)).catch((err) => console.error('revive failed', err)); }
+    function handleRename(name) { if (name) Promise.resolve(actions?.onRenameSession?.(session, name)).catch((err) => console.error('rename failed', err)); }
+    function handleArchive() { Promise.resolve(actions?.onArchiveSession?.(session)).catch((err) => console.error('archive failed', err)); }
     function handleDelete() {
-      if (!session) return;
       const sid = session.id;
       Promise.resolve(actions?.onDeleteSession?.(session))
-        .then(() => {
-          // After delete, drop the optimistic msgs for the gone session and
-          // fall back to launcher.
-          setLocalMessages((prev) => { const { [sid]: _, ...rest } = prev; return rest; });
-          if (activeId === sid) { setActiveId(null); setScreen('launcher'); }
-        })
+        .then(() => { onAfterDelete && onAfterDelete(sid); })
         .catch((err) => console.error('delete failed', err));
     }
-
     function handleSwitchModel(provider, model, effort) {
-      if (!session) return;
       Promise.resolve(actions?.onSwitchModel?.(session, provider, model, effort)).catch((err) => console.error('switch failed', err));
     }
 
-    function handleNewSession() {setScreen('launcher');}
-    function handleHome() {setScreen('launcher');}
+    return (
+      <ChatScreen
+        session={session}
+        messages={messages}
+        theme={theme} variant={variant}
+        tweaks={tweaks}
+        onSend={handleSend}
+        onStop={handleStop}
+        onSteer={handleSteer}
+        onKill={handleKill}
+        onRevive={handleRevive}
+        onRename={handleRename}
+        onArchive={handleArchive}
+        onDelete={handleDelete}
+        onSwitchModel={handleSwitchModel}
+        onLoadOlder={transcript.loadMore}
+        hasOlder={!!transcript.hasMore}
+        loadingOlder={!!transcript.loading}
+        isStreaming={streaming}
+        environments={environments}
+        gitRepos={gitRepos}
+        onClose={showClose ? onClose : null} />
+    );
+  }
+
+  // URL helpers. Routes:
+  //   /                 → launcher
+  //   /settings         → settings screen
+  //   /s/<id>(,<id>)*   → one or more open session panes
+  // Session ids contain ":" (clientName:sessionId), so each id is
+  // urlencoded individually.
+  function parseLocation() {
+    const p = (typeof window !== 'undefined' && window.location?.pathname) || '/';
+    if (p === '/settings' || p === '/settings/') return { screen: 'settings', openIds: [] };
+    const m = p.match(/^\/s\/([^/]+)\/?$/);
+    if (m) {
+      const ids = m[1].split(',').map(decodeURIComponent).filter(Boolean);
+      return { screen: ids.length ? 'chat' : 'launcher', openIds: ids };
+    }
+    return { screen: 'launcher', openIds: [] };
+  }
+  function locationFor(screen, openIds) {
+    if (screen === 'settings') return '/settings';
+    if (screen === 'chat' && openIds && openIds.length) {
+      return '/s/' + openIds.map(encodeURIComponent).join(',');
+    }
+    return '/';
+  }
+
+  function Harness({ tweaks, setTweak, data, actions }) {
+    const variantName = tweaks.variant || 'Eclipse';
+    const variant = window.HARNESS_THEMES[variantName] || window.HARNESS_THEMES.Eclipse;
+    const theme = tweaks.dark ? variant.dark : variant.light;
+
+    // Initial state from URL — falls back to launcher.
+    const initial = useMemo(() => parseLocation(), []);
+    const [openIds, setOpenIds] = useState(initial.openIds);
+    const [screen, setScreen] = useState(initial.screen);
+
+    // Derived: which session objects (from data) match our open ids, in order.
+    const openSessions = openIds
+      .map((id) => data.sessions.find((s) => s.id === id))
+      .filter(Boolean);
+
+    // Reflect state changes back into the URL (without spamming history).
+    useEffect(() => {
+      const want = locationFor(screen, openIds);
+      if (typeof window !== 'undefined' && window.location.pathname !== want) {
+        window.history.replaceState({ screen, openIds }, '', want);
+      }
+    }, [screen, openIds]);
+
+    // Honor browser back/forward.
+    useEffect(() => {
+      function onPop() {
+        const next = parseLocation();
+        setOpenIds(next.openIds);
+        setScreen(next.screen);
+      }
+      window.addEventListener('popstate', onPop);
+      return () => window.removeEventListener('popstate', onPop);
+    }, []);
+
+    // Sidebar click: plain click selects one; ctrl/meta+click toggles.
+    function selectSession(id, event) {
+      const toggle = event && (event.ctrlKey || event.metaKey);
+      setScreen('chat');
+      setOpenIds((prev) => {
+        if (toggle) {
+          if (prev.includes(id)) {
+            const next = prev.filter((x) => x !== id);
+            return next;
+          }
+          return [...prev, id];
+        }
+        return [id];
+      });
+    }
+
+    function closePane(id) {
+      setOpenIds((prev) => prev.filter((x) => x !== id));
+    }
+
+    function afterDelete(sid) {
+      setOpenIds((prev) => prev.filter((x) => x !== sid));
+    }
+
+    function handleNewSession() { setScreen('launcher'); }
+    function handleHome() { setScreen('launcher'); }
     function handleCreateSession(opts) {
-      // If continuing an existing session, just switch to it.
       if (opts && opts.continueId) {
-        setActiveId(opts.continueId);
+        setOpenIds([opts.continueId]);
         setScreen('chat');
         return;
       }
@@ -550,7 +617,8 @@
       Promise.resolve(actions.onCreateSession(opts))
         .then((result) => {
           if (result && result.sessionId && result.clientName) {
-            setActiveId(`${result.clientName}:${result.sessionId}`);
+            const id = `${result.clientName}:${result.sessionId}`;
+            setOpenIds([id]);
           }
           setScreen('chat');
         })
@@ -568,7 +636,8 @@
       Promise.resolve(actions.onBindSession({ env, cwd, sessionId }))
         .then((result) => {
           if (result && result.sessionId && result.clientName) {
-            setActiveId(`${result.clientName}:${result.sessionId}`);
+            const id = `${result.clientName}:${result.sessionId}`;
+            setOpenIds([id]);
           }
           setScreen('chat');
         })
@@ -582,8 +651,6 @@
     useEffect(() => {
       if (tweaks.__openSettings) setScreen('settings');
     }, [tweaks.__openSettings]);
-
-    useEffect(() => () => streamTimer.current && clearTimeout(streamTimer.current), []);
 
     // Global keyboard shortcuts. Mod = Cmd on Mac, Ctrl elsewhere.
     useEffect(() => {
@@ -619,6 +686,13 @@
     const breadcrumb = screen === 'settings' ? 'Settings' : null;
     const showTopBar = true;
 
+    // Effective screen: if user explicitly opened settings, show it; else if
+    // they have any open sessions, show chat panes; else launcher.
+    const effectiveScreen =
+      screen === 'settings' ? 'settings'
+      : openSessions.length === 0 ? 'launcher'
+      : 'chat';
+
     return (
       <div style={{
         width: '100%', height: '100%',
@@ -636,16 +710,15 @@
           sidebarVisible={tweaks.sidebar}
           onHome={handleHome}
           onSettings={() => setScreen('settings')}
-          screen={screen}
+          screen={effectiveScreen}
           breadcrumb={breadcrumb} />
-
         }
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           {tweaks.sidebar &&
           <window.Sidebar
             sessions={data.sessions}
-            activeId={screen === 'chat' ? activeId : null}
-            onSelect={(id) => {setActiveId(id);setScreen('chat');}}
+            activeId={effectiveScreen === 'chat' ? openIds : null}
+            onSelect={selectSession}
             theme={theme} variant={variant}
             density={tweaks.density}
             width={sidebarWidth}
@@ -657,34 +730,34 @@
               if (result && result.then) {
                 result.catch((err) => console.error('delete failed', err));
               }
-              if (s && activeId === s.id) { setActiveId(null); setScreen('launcher'); }
+              if (s) afterDelete(s.id);
             }} />
-
           }
-          {screen === 'chat' && session &&
-          <ChatScreen
-            session={session}
-            messages={messages}
-            theme={theme} variant={variant}
-            tweaks={tweaks}
-            onSend={handleSend}
-            onStop={handleStop}
-            onSteer={handleSteer}
-            onKill={handleKill}
-            onRevive={handleRevive}
-            onRename={handleRename}
-            onArchive={handleArchive}
-            onDelete={handleDelete}
-            onSwitchModel={handleSwitchModel}
-            onLoadOlder={transcript.loadMore}
-            hasOlder={!!transcript.hasMore}
-            loadingOlder={!!transcript.loading}
-            isStreaming={streaming}
-            environments={data.environments}
-            gitRepos={data.gitRepos} />
-
+          {effectiveScreen === 'chat' && openSessions.length > 0 &&
+            <div style={{ flex: 1, display: 'flex', minWidth: 0 }}>
+              {openSessions.map((s, i) => (
+                <div
+                  key={s.id}
+                  style={{
+                    flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column',
+                    borderLeft: i > 0 ? `1px solid ${theme.border}` : 'none',
+                  }}
+                >
+                  <ChatPane
+                    session={s}
+                    theme={theme} variant={variant}
+                    tweaks={tweaks}
+                    environments={data.environments}
+                    gitRepos={data.gitRepos}
+                    actions={actions}
+                    onAfterDelete={afterDelete}
+                    onClose={() => closePane(s.id)}
+                    showClose={openSessions.length > 1} />
+                </div>
+              ))}
+            </div>
           }
-          {screen === 'launcher' &&
+          {effectiveScreen === 'launcher' &&
           <window.LauncherView
             data={data}
             theme={theme} variant={variant}
@@ -693,20 +766,17 @@
             onListSessions={actions?.onListSessions}
             onBind={handleBindSession}
             onCancel={() => setScreen('chat')}
-            hasActiveSession={!!activeId} />
-
+            hasActiveSession={openSessions.length > 0} />
           }
-          {screen === 'settings' &&
+          {effectiveScreen === 'settings' &&
           <window.SettingsView
             theme={theme} variant={variant}
             tweaks={tweaks} setTweak={setTweak}
             data={data}
-            onBack={() => setScreen(activeId ? 'chat' : 'launcher')} />
-
+            onBack={() => setScreen(openSessions.length > 0 ? 'chat' : 'launcher')} />
           }
         </div>
       </div>);
-
   }
 
   window.Harness = Harness;

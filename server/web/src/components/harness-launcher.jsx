@@ -5,6 +5,29 @@
 (function () {
   const { useState, useRef, useEffect, useMemo } = React;
 
+  // Per-client last-used cwd, persisted to localStorage. So flipping back to
+  // an environment auto-fills the directory you were on last time. Falls
+  // back to null when nothing's stored or localStorage is unavailable.
+  const LAST_CWD_KEY = 'hrn:lastCwd';
+  function loadLastCwds() {
+    try {
+      const raw = typeof window !== 'undefined' && window.localStorage?.getItem(LAST_CWD_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+  function saveLastCwd(envId, cwd) {
+    if (!envId || !cwd) return;
+    try {
+      const all = loadLastCwds();
+      all[envId] = cwd;
+      window.localStorage?.setItem(LAST_CWD_KEY, JSON.stringify(all));
+    } catch {}
+  }
+  function rememberedCwd(envId) {
+    if (!envId) return null;
+    return loadLastCwds()[envId] || null;
+  }
+
   function Dropdown({ trigger, children, theme, variant, align = 'left', width = 220 }) {
     const [open, setOpen] = useState(false);
     return (
@@ -575,7 +598,7 @@
                           <DropdownItem
                             key={e.id}
                             active={e.id === env}
-                            onClick={() => { if (!offline) { setEnv(e.id); setCwd(null); setCwdCustom(false); setBranch('main'); close(); } }}
+                            onClick={() => { if (!offline) { setEnv(e.id); const last = rememberedCwd(e.id); setCwd(last); setCwdCustom(false); setBranch('main'); close(); } }}
                             theme={theme} variant={variant}
                             icon={<span style={{
                               width: 7, height: 7, borderRadius: '50%',
@@ -623,7 +646,7 @@
                         <DropdownItem
                           key={c}
                           active={c === cwd}
-                          onClick={() => { setCwd(c); close(); }}
+                          onClick={() => { setCwd(c); saveLastCwd(env, c); close(); }}
                           theme={theme} variant={variant}
                           icon={<window.Icons.Folder size={11} />}
                           label={<span style={{ fontFamily: variant.mono, fontSize: 11.5 }}>{c}</span>}
@@ -650,7 +673,7 @@
               {mode === 'code' && env && cwdCustom && (
                 <CustomPathInput
                   value={cwd}
-                  onCommit={setCwd}
+                  onCommit={(p) => { setCwd(p); saveLastCwd(env, p); }}
                   onPickList={() => setCwdCustom(false)}
                   theme={theme} variant={variant}
                 />
@@ -761,7 +784,7 @@
                           <DropdownItem
                             key={e.id}
                             active={e.id === bindEnv}
-                            onClick={() => { if (!offline) { setBindEnv(e.id); setBindCwd(null); setBindCwdCustom(false); close(); } }}
+                            onClick={() => { if (!offline) { setBindEnv(e.id); setBindCwd(rememberedCwd(e.id)); setBindCwdCustom(false); close(); } }}
                             theme={theme} variant={variant}
                             icon={<span style={{
                               width: 7, height: 7, borderRadius: '50%',
@@ -806,7 +829,7 @@
                           <DropdownItem
                             key={c}
                             active={c === bindCwd}
-                            onClick={() => { setBindCwd(c); close(); }}
+                            onClick={() => { setBindCwd(c); saveLastCwd(bindEnv, c); close(); }}
                             theme={theme} variant={variant}
                             icon={<window.Icons.Folder size={11} />}
                             label={<span style={{ fontFamily: variant.mono, fontSize: 11.5 }}>{c}</span>}
@@ -833,7 +856,7 @@
                 {bindEnv && bindCwdCustom && (
                   <CustomPathInput
                     value={bindCwd}
-                    onCommit={setBindCwd}
+                    onCommit={(p) => { setBindCwd(p); saveLastCwd(bindEnv, p); }}
                     onPickList={() => setBindCwdCustom(false)}
                     theme={theme} variant={variant}
                   />

@@ -734,8 +734,8 @@
                 {!isCollapsed && items.map(s => (
                   <SessionRow
                     key={s.id} session={s}
-                    active={s.id === activeId}
-                    onClick={() => onSelect(s.id)}
+                    active={Array.isArray(activeId) ? activeId.includes(s.id) : s.id === activeId}
+                    onClick={(e) => onSelect(s.id, e)}
                     theme={theme} variant={variant} density={density}
                     onRename={onRenameSession}
                     onArchive={onArchiveSession}

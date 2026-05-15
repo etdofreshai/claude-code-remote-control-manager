@@ -66,13 +66,18 @@ export function useTranscript(clientName, sessionId, { roles, search } = {}) {
   // chunk in our list. We deliberately don't try to merge byte-for-byte —
   // for a chat-style UI, just refreshing the tail keeps things simple and
   // reliable.
+  // `total` is read via a ref so growth doesn't tear down and rebuild the
+  // interval on every message (which caused redundant fetch bursts).
+  const totalRef = useRef(0);
+  useEffect(() => { totalRef.current = total; }, [total]);
+
   useEffect(() => {
     if (!clientName || !sessionId) return;
     const id = setInterval(async () => {
       try {
         const r = await apiFetch(buildUrl(clientName, sessionId, { cursor: 0, roles, search }));
         if (!aliveRef.current) return;
-        if ((r.total || 0) !== total) {
+        if ((r.total || 0) !== totalRef.current) {
           setTotal(r.total || 0);
           setHasMore(!!r.hasMore);
           // Replace the latest page; keep any older pages already loaded.
@@ -88,7 +93,7 @@ export function useTranscript(clientName, sessionId, { roles, search } = {}) {
       }
     }, POLL_MS);
     return () => clearInterval(id);
-  }, [clientName, sessionId, rolesKey, search, total]);
+  }, [clientName, sessionId, rolesKey, search]);
 
   const loadMore = useCallback(async () => {
     if (!clientName || !sessionId || loading || !hasMore) return;

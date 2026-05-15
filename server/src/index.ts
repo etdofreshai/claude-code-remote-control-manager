@@ -252,15 +252,19 @@ await app.register(fastifyStatic, {
 
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 const INDEX_PATH = path.join(PUBLIC_DIR, "index.html");
-// The Vite build emits index.html. In dev (before `npm run --prefix server/web
-// build`), it may not exist yet — fall back to a friendly stub so the API
-// still works and the user sees a clear hint.
-const INDEX_HTML = existsSync(INDEX_PATH)
-  ? readFileSync(INDEX_PATH, "utf8")
-  : `<!doctype html><html><body style="font-family:system-ui;padding:32px;color:#444">
+const INDEX_FALLBACK = `<!doctype html><html><body style="font-family:system-ui;padding:32px;color:#444">
 <h1>Frontend not built</h1>
 <p>Run <code>npm install &amp;&amp; npm run build</code> in <code>server/web/</code>, or start the Vite dev server with <code>npm run dev</code> in <code>server/web/</code>.</p>
 </body></html>`;
+// Read each request so a fresh `npm run build` is picked up without restarting
+// the server. The file is small (~2 KB) so the FS hit is negligible.
+function readIndexHtml(): string {
+  try {
+    return existsSync(INDEX_PATH) ? readFileSync(INDEX_PATH, "utf8") : INDEX_FALLBACK;
+  } catch {
+    return INDEX_FALLBACK;
+  }
+}
 
 const isAuthed = (req: any) => {
   if (req.cookies?.[SESSION_COOKIE] === SESSION_VALUE) return true;
@@ -310,7 +314,7 @@ app.get("/version", async () => {
 // /login is now part of the SPA. Serve the same bundle; the React app
 // renders <Login /> when no token is present in localStorage and <App />
 // otherwise.
-app.get("/login", async (_req, reply) => reply.type("text/html").send(INDEX_HTML));
+app.get("/login", async (_req, reply) => reply.type("text/html").send(readIndexHtml()));
 
 app.post("/api/login", async (req, reply) => {
   const body = (req.body ?? {}) as { password?: string };
@@ -334,7 +338,7 @@ app.post("/api/logout", async (_req, reply) => {
   reply.clearCookie(SESSION_COOKIE, { path: "/" }).send({ ok: true });
 });
 
-app.get("/", async (_req, reply) => reply.type("text/html").send(INDEX_HTML));
+app.get("/", async (_req, reply) => reply.type("text/html").send(readIndexHtml()));
 
 function isAgentOnline(agent: Agent, now = Date.now()): boolean {
   return now - new Date(agent.lastSeenAt).getTime() < AGENT_OFFLINE_AFTER_MS;

@@ -6,19 +6,7 @@ import os from "node:os";
 import { load, save, type TrackedSession, type Effort } from "./state.js";
 import { readSessionTitle } from "./list.js";
 import { getProvider, resolveEndpoint } from "./providers.js";
-import { recordSdkMessage, backfillFromDisk, appendMessages } from "./transcripts.js";
-
-/** Push a short system-kind row into the session's transcript. Used to mark
- *  in-band events (e.g., model/effort switches) that aren't messages from
- *  the model but should be visible in the conversation. */
-function recordSystemNote(sessionId: string, text: string): void {
-  appendMessages(sessionId, [{
-    ts: new Date().toISOString(),
-    role: "system",
-    kind: "system",
-    text,
-  }]);
-}
+import { recordSdkMessage, backfillFromDisk } from "./transcripts.js";
 import { startCodexRunner } from "./codex-sdk-runner.js";
 
 // The SDK looks for its own bundled binary by default; point it at the
@@ -814,20 +802,9 @@ export async function switchSession(
   const model = next.model?.trim() || entry.model;
   const effort = (next.effort ?? entry.effort ?? DEFAULT_EFFORT) as Effort;
 
-  // Subtle system-row note recorded into the transcript just before the new
-  // runner takes over. The UI stages picker changes locally and calls
-  // switchSession only when the user actually sends a message, so this row
-  // shows up right above their next message — confirming visually that the
-  // new model/effort took effect on that turn.
-  const changedParts: string[] = [];
-  if (provider !== entry.provider || model !== entry.model) {
-    const slug = model ? `${provider}/${model}` : provider;
-    changedParts.push(`model: ${slug}`);
-  }
-  if (effort !== entry.effort) changedParts.push(`effort: ${effort}`);
-  if (changedParts.length) {
-    recordSystemNote(sessionId, `▾ ${changedParts.join(", ")}`);
-  }
+  // The UI folds the change marker into the user's next message itself
+  // (same shape as the bootstrap merge) — see InputBox.fire(). switchSession
+  // itself stays silent in the transcript.
 
   await killSession(sessionId);
   await new Promise((r) => setTimeout(r, 250));

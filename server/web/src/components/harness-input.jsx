@@ -416,30 +416,42 @@
       }
     }, [text]);
 
+    // Picker changes are staged locally — apply them just-in-time before
+    // the next user message, so flipping the dropdown is silent until the
+    // user actually decides to send. Returns a short "▾ effort: high"
+    // (or similar) prefix that fire() folds into the user's message so
+    // the change is visible in the transcript, same shape as the
+    // bootstrap merge in startQuery.
     async function maybeSwitchFirst() {
-      // Picker changes are staged locally — apply them just-in-time before
-      // the next user message, so flipping the dropdown is silent until
-      // the user actually decides to send.
-      const dirty =
-        provider !== session.provider ||
-        model !== session.model ||
-        effort !== (session.effort || 'medium');
-      if (dirty && onSwitchModel) {
+      const sessionEffort = session.effort || 'medium';
+      const parts = [];
+      if (provider !== session.provider || model !== session.model) {
+        const slug = model ? `${provider}/${model}` : provider;
+        parts.push(`model: ${slug}`);
+      }
+      if (effort !== sessionEffort) parts.push(`effort: ${effort}`);
+      if (!parts.length) return '';
+      if (onSwitchModel) {
         try { await onSwitchModel(provider, model, effort); }
         catch (err) { console.error('switch failed', err); }
       }
+      return `▾ ${parts.join(', ')}`;
+    }
+
+    function composeText(prefix, body) {
+      return prefix ? `${prefix}\n\n${body}` : body;
     }
 
     async function fire() {
       if (mode === 'stop') {onStop && onStop();return;}
       if (mode === 'steer') {
         if (!text.trim()) return;
-        await maybeSwitchFirst();
-        onSteer && onSteer(text);setText('');return;
+        const prefix = await maybeSwitchFirst();
+        onSteer && onSteer(composeText(prefix, text));setText('');return;
       }
       if (!text.trim()) return;
-      await maybeSwitchFirst();
-      onSend(text);
+      const prefix = await maybeSwitchFirst();
+      onSend(composeText(prefix, text));
       setText('');
     }
 

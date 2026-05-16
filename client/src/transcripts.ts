@@ -71,7 +71,25 @@ export function normalize(sdkMsg: any): TranscriptMessage[] {
   const content = sdkMsg.message?.content;
   const baseId = sdkMsg.message?.id as string | undefined;
 
+  // CLI scaffolding around local + slash commands. Stored as user-role text
+  // in the on-disk JSONL but the CLI itself hides them. Drop so the mirrored
+  // transcript reads like a normal conversation.
+  const isCliScaffolding = (s: string): boolean => {
+    const t = s.trimStart();
+    return (
+      t.startsWith("<local-command-caveat>") ||
+      t.startsWith("<command-name>") ||
+      t.startsWith("<command-message>") ||
+      t.startsWith("<command-stdout>") ||
+      t.startsWith("<command-stderr>") ||
+      t.startsWith("<bash-input>") ||
+      t.startsWith("<bash-stdout>") ||
+      t.startsWith("<bash-stderr>")
+    );
+  };
+
   if (typeof content === "string") {
+    if (isCliScaffolding(content)) return [];
     return [{ ts, role, kind: "text", text: content, id: baseId }];
   }
   if (!Array.isArray(content)) return [];
@@ -80,9 +98,12 @@ export function normalize(sdkMsg: any): TranscriptMessage[] {
   for (const block of content) {
     if (!block || typeof block !== "object") continue;
     switch (block.type) {
-      case "text":
-        out.push({ ts, role, kind: "text", text: String(block.text ?? ""), id: baseId });
+      case "text": {
+        const text = String(block.text ?? "");
+        if (isCliScaffolding(text)) break;
+        out.push({ ts, role, kind: "text", text, id: baseId });
         break;
+      }
       case "thinking": {
         // The interactive CLI persists thinking to the on-disk transcript as
         // signature-only — the reasoning text is stripped. Skip empty

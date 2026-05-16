@@ -432,6 +432,11 @@
     const [localMessages, setLocalMessages] = useState([]);
     const [streaming, setStreaming] = useState(false);
     const streamTimer = useRef(null);
+    // Wall-clock at which the current send/steer/title request fired. The
+    // watcher below clears `streaming` as soon as it sees an assistant text or
+    // system row newer than this — so a fast turn (e.g. /clear → empty reply)
+    // doesn't leave the input stuck in Steer mode until the 8s fallback fires.
+    const turnStartedAtRef = useRef(0);
 
     const transcript = window.useTranscript(session?.clientName ?? null, session?.sessionId ?? null);
     const baseMessages = (transcript.messages || []).map((m) => ({
@@ -458,6 +463,25 @@
     }, [baseMessages, localMessages]);
 
     useEffect(() => () => streamTimer.current && clearTimeout(streamTimer.current), []);
+
+    // Clear `streaming` as soon as an assistant text/tool row newer than the
+    // current turn-start shows up. This is what unsticks the input from Steer
+    // mode after a fast reply — without it we'd wait the full 8s fallback.
+    useEffect(() => {
+      if (!streaming) return;
+      const since = turnStartedAtRef.current;
+      if (!since) return;
+      for (let i = baseMessages.length - 1; i >= 0; i--) {
+        const m = baseMessages[i];
+        const t = m?.time ?? 0;
+        if (t < since) break;
+        if (m.role === 'assistant' || (m.role === 'system' && m.kind === 'system')) {
+          setStreaming(false);
+          if (streamTimer.current) { clearTimeout(streamTimer.current); streamTimer.current = null; }
+          break;
+        }
+      }
+    }, [baseMessages, streaming]);
 
     // When a /rename without an argument is in flight, watch the transcript
     // for the next assistant text message and use it as the new title.
@@ -507,6 +531,7 @@
         "Suggest a short session title summarizing this conversation so far. " +
         "3 to 6 words, lowercase, kebab-case. " +
         "Reply with ONLY the title — no quotes, no trailing period, no explanation.";
+      turnStartedAtRef.current = Date.now();
       setStreaming(true);
       if (streamTimer.current) clearTimeout(streamTimer.current);
       streamTimer.current = setTimeout(() => setStreaming(false), 15_000);
@@ -540,6 +565,7 @@
       if (!session || !text) return;
       if (handleHarnessCommand(text)) return;
       appendOptimistic(text, 'user');
+      turnStartedAtRef.current = Date.now();
       setStreaming(true);
       if (streamTimer.current) clearTimeout(streamTimer.current);
       streamTimer.current = setTimeout(() => setStreaming(false), 8000);

@@ -744,6 +744,36 @@
 
   }
 
+  // Pair tool_use rows with their matching tool_result by id and fold the
+  // result's status + payload into the original row. Drops the standalone
+  // "(result)" row. Rows without a result (still in flight) pass through
+  // untouched with status="pending"; rows whose result lands later flip to
+  // "ok" / "fail" on the next re-render.
+  function mergeToolPairs(messages) {
+    const out = [];
+    const indexById = new Map();
+    for (const m of messages) {
+      if (m.kind === 'tool' && m.tool === '(result)' && m.id) {
+        const idx = indexById.get(m.id);
+        if (idx != null) {
+          const orig = out[idx];
+          out[idx] = {
+            ...orig,
+            status: m.status,
+            result: m.result,
+            error: m.status === 'fail' ? (m.result || orig.error) : orig.error,
+          };
+          continue;
+        }
+      }
+      if (m.kind === 'tool' && m.tool !== '(result)' && m.id) {
+        indexById.set(m.id, out.length);
+      }
+      out.push(m);
+    }
+    return out;
+  }
+
   // Build a plaintext transcript of the messages for copy-to-clipboard.
   function toPlainText(messages, sessionTitle) {
     const lines = [`# ${sessionTitle}`, ''];
@@ -1068,13 +1098,17 @@
       const prevCount = messageCountRef.current;
       messageCountRef.current = messages.length;
       const delta = messages.length - prevCount;
-      if (delta > 0 && el.scrollHeight > prev.height && !prev.atBottom && prev.height > 0) {
-        // Older messages prepended (loadMore) — keep the user's anchor.
+      const isPrepend = delta > 0 && el.scrollHeight > prev.height && prev.top < 80 && prev.height > 0;
+      if (isPrepend) {
+        // loadMore prepended older messages — keep the user's visible anchor
+        // by advancing scrollTop by exactly the height that just grew above.
         el.scrollTop = prev.top + (el.scrollHeight - prev.height);
       } else if (prev.atBottom || prev.height === 0) {
         // Initial load OR user was already at the bottom: follow the latest.
         el.scrollTop = el.scrollHeight;
       }
+      // Otherwise leave scrollTop alone — the user was reading mid-conversation
+      // and we don't want incoming messages to shove them off their spot.
       lastMeasureRef.current = {
         height: el.scrollHeight,
         top: el.scrollTop,
@@ -1142,9 +1176,13 @@
           }}>{toPlainText(visible, sessionTitle)}</pre>);
 
       }
+      // Fold tool_result rows into their matching tool_use by id so the
+      // chat shows one "Bash (ls) … ok" row that flips from pending → ok
+      // instead of a pending row followed by a separate "(result)" row.
+      const merged = mergeToolPairs(visible);
       const filtered = view === 'conversation' ?
-      visible.filter((m) => m.kind === 'text' || m.kind === 'attachment') :
-      visible;
+      merged.filter((m) => m.kind === 'text' || m.kind === 'attachment') :
+      merged;
       return (
         <div style={{
           maxWidth: bubble ? 760 : 'none',

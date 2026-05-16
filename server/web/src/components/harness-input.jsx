@@ -410,13 +410,29 @@
       }
     }, [text]);
 
-    function fire() {
+    async function maybeSwitchFirst() {
+      // Picker changes are staged locally — apply them just-in-time before
+      // the next user message, so flipping the dropdown is silent until
+      // the user actually decides to send.
+      const dirty =
+        provider !== session.provider ||
+        model !== session.model ||
+        effort !== (session.effort || 'medium');
+      if (dirty && onSwitchModel) {
+        try { await onSwitchModel(provider, model, effort); }
+        catch (err) { console.error('switch failed', err); }
+      }
+    }
+
+    async function fire() {
       if (mode === 'stop') {onStop && onStop();return;}
       if (mode === 'steer') {
         if (!text.trim()) return;
+        await maybeSwitchFirst();
         onSteer && onSteer(text);setText('');return;
       }
       if (!text.trim()) return;
+      await maybeSwitchFirst();
       onSend(text);
       setText('');
     }
@@ -481,18 +497,12 @@
                 <window.Icons.Paperclip size={13} />
               </IconBtn>
 
-              {/* Center: pickers */}
+              {/* Center: pickers. Changes here just stage the new value
+                  locally — the actual switchSession call happens on the
+                  next user message (see fire() / maybeSwitchFirst). */}
               <ModelPicker provider={provider} model={model} theme={theme} variant={variant} providers={providers}
-              onChange={(p, m) => {
-                setProvider(p); setModel(m);
-                if ((p !== session.provider || m !== session.model) && onSwitchModel) {
-                  onSwitchModel(p, m, effort);
-                }
-              }} />
-              <BudgetPicker value={effort} onChange={(e) => {
-                setEffort(e);
-                if (e !== session.effort && onSwitchModel) onSwitchModel(provider, model, e);
-              }} theme={theme} variant={variant} />
+              onChange={(p, m) => { setProvider(p); setModel(m); }} />
+              <BudgetPicker value={effort} onChange={(e) => setEffort(e)} theme={theme} variant={variant} />
               <Pill theme={theme} variant={variant} onClick={() => setText('/')}>
                 <window.Icons.Slash size={12} />
                 <span style={{ color: theme.textMuted }}>commands</span>

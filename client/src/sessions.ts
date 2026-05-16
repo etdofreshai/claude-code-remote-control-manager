@@ -811,16 +811,7 @@ export async function switchSession(
     const slug = m ? `${p ?? "default"}/${m}` : (p ?? "default");
     return `${slug} (effort: ${e ?? "default"})`;
   };
-  const before = fmt(entry.provider, entry.model, entry.effort);
-  const after = fmt(provider, model, effort);
-  const changed =
-    entry.provider !== provider ||
-    entry.model !== model ||
-    entry.effort !== effort;
-  const noticeText =
-    changed && before !== after
-      ? `Model/effort switched: ${before} → ${after}. No reply needed.`
-      : undefined;
+  void fmt; // kept for debug logging if reintroduced
 
   await killSession(sessionId);
   await new Promise((r) => setTimeout(r, 250));
@@ -841,7 +832,8 @@ export async function switchSession(
     model,
     effort,
     pushBootstrap: false,
-    noticeText,
+    // No noticeText — the switch is silent. UI stages picker changes and
+    // applies them via switchSession just before the next user message.
   }).catch((err) => console.error(`switchSession ${sessionId}: spawn failed`, err));
 
   return { ...entry, provider, model, effort };

@@ -741,6 +741,27 @@ app.post("/api/agent/transcripts/append", async (req) => {
   return result;
 });
 
+// Mark an agent offline immediately and release any blocked long-poll for
+// it. The client calls this from its shutdown handler so the UI's "online"
+// dot flips in <1s instead of waiting AGENT_OFFLINE_AFTER_MS for the
+// heartbeat to lapse.
+app.post("/api/agent/disconnect", async (req) => {
+  const body = (req.body ?? {}) as { name?: string };
+  if (!body.name) throw new Error("name required");
+  const agent = agents.get(body.name);
+  if (agent) {
+    agents.set(body.name, {
+      ...agent,
+      lastSeenAt: new Date(Date.now() - AGENT_OFFLINE_AFTER_MS - 1_000).toISOString(),
+    });
+  }
+  // Release any in-flight long-poll so the client's poll request returns
+  // 204-style (null) instead of holding the socket open until our timeout.
+  const list = waiters.get(body.name) ?? [];
+  while (list.length) list.shift()!(null);
+  return { ok: true };
+});
+
 app.post("/api/agent/register", async (req) => {
   const body = req.body as Partial<Agent>;
   if (!body?.name) throw new Error("name required");

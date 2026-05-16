@@ -94,9 +94,12 @@ async function register(): Promise<void> {
   });
 }
 
+let pollAbort: AbortController | null = null;
+
 async function pollOnce(): Promise<void> {
   const url = `${SERVER_URL}/api/agent/poll?name=${encodeURIComponent(AGENT_NAME)}`;
-  const res = await fetch(url, { headers });
+  pollAbort = new AbortController();
+  const res = await fetch(url, { headers, signal: pollAbort.signal });
   if (res.status === 204) return;
   if (!res.ok) throw new Error(`poll ${res.status}`);
   const cmd = (await res.json()) as {
@@ -211,10 +214,11 @@ async function pollOnce(): Promise<void> {
 }
 
 async function pollLoop(): Promise<void> {
-  while (true) {
+  while (!shuttingDown) {
     try {
       await pollOnce();
     } catch (err) {
+      if (shuttingDown) return;
       console.error("poll error", err);
       await new Promise((r) => setTimeout(r, 5_000));
     }
@@ -269,14 +273,39 @@ async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`received ${signal}, shutting down...`);
+  // Cancel any in-flight long-poll so the disconnect POST doesn't compete
+  // for the socket and the loop exits promptly.
+  try { pollAbort?.abort(); } catch { /* noop */ }
   try {
     await shutdownAll();
-  } finally {
-    process.exit(0);
+  } catch (err) {
+    console.error("shutdownAll failed", err);
   }
+  // Best-effort tell the server we're offline so the UI flips immediately
+  // instead of waiting for the heartbeat to lapse. Short timeout — we're
+  // exiting either way.
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1_500);
+    await fetch(`${SERVER_URL}/api/agent/disconnect`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name: AGENT_NAME }),
+      signal: ctrl.signal,
+    }).catch(() => {});
+    clearTimeout(timer);
+  } catch { /* noop */ }
+  process.exit(0);
 }
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGHUP", () => void shutdown("SIGHUP"));
+// Windows-specific: tsx/Node maps Ctrl-Break to SIGBREAK. Also catch
+// unexpected exit and try a synchronous best-effort disconnect — Node's
+// beforeExit fires when the loop is otherwise empty.
+if (process.platform === "win32") {
+  process.on("SIGBREAK" as any, () => void shutdown("SIGBREAK"));
+}
 
 main().catch((err) => {
   console.error(err);

@@ -387,6 +387,7 @@
     const [text, setText] = useState('');
     const [provider, setProvider] = useState('claude');
     const [model, setModel] = useState('sonnet');
+    const [effort, setEffort] = useState('medium');
     const [cwd, setCwd] = useState(null);
     const [branch, setBranch] = useState('main');
     const [env, setEnv] = useState(null);
@@ -448,7 +449,7 @@
 
     function fire() {
       if (!canFire) return;
-      onCreate && onCreate({ mode, text, provider, model,
+      onCreate && onCreate({ mode, text, provider, model, effort,
         cwd: mode === 'code' ? cwd : null,
         branch: mode === 'code' ? branch : null,
         env: mode === 'code' ? env : null });
@@ -596,6 +597,40 @@
                     />
                   ));
                 }}
+              </Dropdown>
+
+              {/* Reasoning effort */}
+              <Dropdown
+                theme={theme} variant={variant} width={180}
+                trigger={(open) => (
+                  <PillTrigger
+                    icon={<window.Icons.Brain size={11} />}
+                    value={effort}
+                    open={open} theme={theme} variant={variant}
+                  />
+                )}
+              >
+                {({ close }) => (
+                  <>
+                    {[
+                      { id: 'low', label: 'Low', hint: '4k' },
+                      { id: 'medium', label: 'Medium', hint: '16k' },
+                      { id: 'high', label: 'High', hint: '64k' },
+                      { id: 'xhigh', label: 'X-High', hint: '128k' },
+                      { id: 'max', label: 'Max', hint: '256k' },
+                    ].map((o) => (
+                      <DropdownItem
+                        key={o.id}
+                        active={o.id === effort}
+                        onClick={() => { setEffort(o.id); close(); }}
+                        theme={theme} variant={variant}
+                        icon={<window.Icons.Brain size={11} />}
+                        label={o.label}
+                        hint={o.hint}
+                      />
+                    ))}
+                  </>
+                )}
               </Dropdown>
 
               {/* Client / host — only in code mode; defaults to none, and the

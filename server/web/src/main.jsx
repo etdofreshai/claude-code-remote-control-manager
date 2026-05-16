@@ -75,6 +75,7 @@ function App() {
           workingDirectory: cwd,
           provider: opts.provider,
           model: opts.model,
+          effort: opts.effort,
         });
         const newSessionId = result?.sessionId || result?.id;
         if (opts.text && newSessionId) {

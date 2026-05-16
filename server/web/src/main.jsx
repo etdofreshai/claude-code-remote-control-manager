@@ -71,16 +71,17 @@ function App() {
         const env = opts.env || (data?.environments?.find((e) => e.connected && e.enabled)?.id);
         if (!env) throw new Error('No environment selected and none online');
         const cwd = opts.cwd || '~';
+        // Pass the launcher's text through to createSession so the server
+        // folds it into the bootstrap message — one user-side turn instead
+        // of a separate sendMessage that duplicates the prompt.
         const result = await api.createSession(env, {
           workingDirectory: cwd,
           provider: opts.provider,
           model: opts.model,
           effort: opts.effort,
+          text: opts.text,
         });
         const newSessionId = result?.sessionId || result?.id;
-        if (opts.text && newSessionId) {
-          await api.sendMessage(env, newSessionId, opts.text);
-        }
         return { clientName: env, sessionId: newSessionId };
       },
       // Bind mode: list on-disk sessions for an env+directory (the `list`

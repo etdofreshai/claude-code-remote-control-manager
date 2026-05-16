@@ -123,6 +123,7 @@ async function pollOnce(): Promise<void> {
       page?: number;
       pageSize?: number;
       query?: string;
+      text?: string;
     };
   };
   console.log("received command", cmd.type, cmd.id);
@@ -136,6 +137,7 @@ async function pollOnce(): Promise<void> {
         provider: cmd.payload.provider,
         model: cmd.payload.model,
         effort: cmd.payload.effort,
+        initialText: cmd.payload.text,
       });
     } else if (cmd.type === "bind") {
       if (!cmd.payload.sessionId || !cmd.payload.workingDirectory)

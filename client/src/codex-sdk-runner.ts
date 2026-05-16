@@ -201,19 +201,14 @@ export function startCodexRunner(opts: CodexRunnerOpts): CodexRunningSession {
   const runOne = async (msg: any): Promise<void> => {
     const text = extractTextFromUserMsg(msg);
     if (!text || !text.trim()) {
-      // Synthetic bootstrap messages — record the user line and skip the turn.
-      appendMessages(opts.sessionId, [{
-        ts: new Date().toISOString(),
-        role: "user", kind: "text",
-        text: typeof msg?.message?.content === "string" ? msg.message.content : "",
-      }]);
+      // Empty/synthetic — nothing to send to the SDK and nothing to record
+      // (callers in sessions.ts already recordSdkMessage for any user-side
+      // input they push, so a no-op here keeps records consistent).
       return;
     }
-    // Record the user message immediately so it shows up before the model replies.
-    appendMessages(opts.sessionId, [{
-      ts: new Date().toISOString(),
-      role: "user", kind: "text", text,
-    }]);
+    // Don't pre-record the user message — sessions.ts records it via
+    // recordSdkMessage(), and the bootstrap is recorded in startQueryCodex.
+    // Recording here too would produce duplicate user rows in the transcript.
 
     console.log(
       `codex session ${opts.sessionId}: running turn (model=${opts.model ?? "default"}, cwd=${cwd}, textLen=${text.length})`,

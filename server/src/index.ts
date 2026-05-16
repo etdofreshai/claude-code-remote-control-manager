@@ -169,6 +169,9 @@ interface AgentCommand {
     page?: number;
     pageSize?: number;
     query?: string;
+    /** Launcher's first prompt — folded into the bootstrap so the model
+     *  responds to it directly in the same turn. */
+    text?: string;
   };
 }
 
@@ -435,12 +438,14 @@ app.post("/api/clients/:name/sessions/new", async (req) => {
     provider,
     model,
     effort,
+    text,
   } = req.body as {
     workingDirectory: string;
     name?: string;
     provider?: string;
     model?: string;
     effort?: string;
+    text?: string;
   };
   if (!workingDirectory) throw new Error("workingDirectory required");
   const cmd: AgentCommand = {
@@ -452,6 +457,7 @@ app.post("/api/clients/:name/sessions/new", async (req) => {
       provider,
       model,
       effort,
+      text,
     },
   };
   return enqueue(name, cmd);

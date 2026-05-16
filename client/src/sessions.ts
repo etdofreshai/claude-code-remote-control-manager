@@ -165,16 +165,23 @@ function bootstrapMessage(opts: {
   provider: string;
   model?: string;
   effort: Effort;
+  /** If set, the user's first prompt is folded into the bootstrap with a
+   *  blank-line separator. Drops the "No reply needed." suffix so the model
+   *  responds to the prompt instead of acking the intro. */
+  initialText?: string;
 }): any {
   const origin = (process.env.SERVER_URL ?? "").trim() || "claude-code-remote-control-manager";
   const host = process.env.AGENT_NAME?.trim() || os.hostname();
   const modelPart = opts.model ? `${opts.provider}/${opts.model}` : opts.provider;
-  const text = `Session started from ${origin} on host ${host} via ${modelPart} (effort: ${opts.effort}). No reply needed.`;
+  const intro = `Session started from ${origin} on host ${host} via ${modelPart} (effort: ${opts.effort}).`;
+  const text = opts.initialText && opts.initialText.trim()
+    ? `${intro}\n\n${opts.initialText.trim()}`
+    : `${intro} No reply needed.`;
   return {
     type: "user",
     message: { role: "user", content: text },
     parent_tool_use_id: null,
-    isSynthetic: true,
+    isSynthetic: !opts.initialText,
     timestamp: new Date().toISOString(),
   };
 }
@@ -213,6 +220,7 @@ async function startQueryCodex(opts: {
   effort: Effort;
   pushBootstrap: boolean;
   noticeText?: string;
+  initialText?: string;
 }): Promise<RunningSession> {
   const tracked = load().find((s) => s.sessionId === opts.sessionId);
   const runner = startCodexRunner({
@@ -228,19 +236,26 @@ async function startQueryCodex(opts: {
   });
 
   if (opts.noticeText) {
-    runner.push({
+    const m = {
       type: "user",
       message: { role: "user", content: opts.noticeText },
       parent_tool_use_id: null,
       isSynthetic: true,
       timestamp: new Date().toISOString(),
-    });
+    };
+    runner.push(m);
+    recordSdkMessage(opts.sessionId, m);
   } else if (!opts.resume && opts.pushBootstrap) {
-    runner.push(bootstrapMessage({
+    const m = bootstrapMessage({
       provider: "codex",
       model: opts.model,
       effort: opts.effort,
-    }));
+      initialText: opts.initialText,
+    });
+    runner.push(m);
+    // Record the bootstrap here so the codex runner doesn't have to (which
+    // would clash with sendMessage's own record path for later turns).
+    recordSdkMessage(opts.sessionId, m);
   }
 
   patch(opts.sessionId, { status: "running" });
@@ -270,6 +285,9 @@ async function startQuery(opts: {
    *  pushed as a synthetic user message even on resume — useful for
    *  in-band notices like model-switch announcements. */
   noticeText?: string;
+  /** Fold the user's first prompt into the bootstrap so the model
+   *  responds to it directly. */
+  initialText?: string;
 }): Promise<RunningSession> {
   // Codex sessions go through @openai/codex-sdk, not the Claude Agent SDK.
   if (opts.provider === "codex") {
@@ -281,6 +299,7 @@ async function startQuery(opts: {
       effort: opts.effort,
       pushBootstrap: opts.pushBootstrap,
       noticeText: opts.noticeText,
+      initialText: opts.initialText,
     });
   }
 
@@ -306,7 +325,12 @@ async function startQuery(opts: {
     push(m);
     recordSdkMessage(opts.sessionId, m);
   } else if (!opts.resume && opts.pushBootstrap) {
-    const m = bootstrapMessage({ provider: opts.provider, model: opts.model, effort: opts.effort });
+    const m = bootstrapMessage({
+      provider: opts.provider,
+      model: opts.model,
+      effort: opts.effort,
+      initialText: opts.initialText,
+    });
     push(m);
     recordSdkMessage(opts.sessionId, m);
   }
@@ -522,6 +546,10 @@ export interface StartOpts {
   provider?: string;
   model?: string;
   effort?: Effort;
+  /** If set, the user's first prompt is folded into the bootstrap message
+   *  so the model responds to it directly — replaces the separate
+   *  "createSession then sendMessage" handshake. */
+  initialText?: string;
 }
 
 export async function startNew(opts: StartOpts): Promise<TrackedSession> {
@@ -549,6 +577,7 @@ export async function startNew(opts: StartOpts): Promise<TrackedSession> {
     model: entry.model,
     effort,
     pushBootstrap: true,
+    initialText: opts.initialText,
   })
     .then(async (rs) => {
       try {

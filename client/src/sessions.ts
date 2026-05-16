@@ -748,6 +748,10 @@ export async function sendMessage(
       console.log(`sendMessage: session ${sessionId} is disabled`);
       return { sent: false, reason: "session disabled" };
     }
+    if (entry.mirror) {
+      console.log(`sendMessage: session ${sessionId} is a read-only CLI mirror`);
+      return { sent: false, reason: "session is a read-only CLI mirror" };
+    }
     console.log(
       `sendMessage: session ${sessionId} not running — respawning (resume)`,
     );
@@ -920,6 +924,10 @@ export async function resumeAllTracked(): Promise<void> {
     if (running.has(entry.sessionId)) continue;
     if (entry.enabled === false) {
       console.log(`skipping disabled session ${entry.sessionId}`);
+      continue;
+    }
+    if (entry.mirror) {
+      console.log(`skipping mirror session ${entry.sessionId}`);
       continue;
     }
     try {

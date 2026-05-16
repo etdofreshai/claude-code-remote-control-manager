@@ -26,6 +26,7 @@ import {
 import { listLocalSessions } from "./list.js";
 import { publicProviders, discoverModels, setProviderModels } from "./providers.js";
 import { backfillFromDisk } from "./transcripts.js";
+import { startCliMirror } from "./mirror.js";
 import type { Effort } from "./state.js";
 
 const SERVER_URL = (process.env.SERVER_URL ?? "").replace(/\/+$/, "");
@@ -256,6 +257,8 @@ async function main(): Promise<void> {
     refreshLastMessageAtAll();
     reportSessions().catch(() => {});
   }, 15_000);
+
+  startCliMirror();
 
   console.log("polling for commands...");
   await pollLoop();

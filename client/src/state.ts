@@ -19,6 +19,10 @@ export interface TrackedSession {
   /** Codex SDK thread id; populated after the first turn for provider=codex.
    *  Used to resume the same thread across client restarts. */
   codexThreadId?: string;
+  /** Read-only mirror of a standalone `claude` CLI session — we tail its
+   *  on-disk JSONL and replicate. Harness must never start a runner for it
+   *  (it would race with the CLI for the same session file). */
+  mirror?: boolean;
 }
 
 const STATE_DIR =

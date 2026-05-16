@@ -236,11 +236,88 @@
 
   }
 
+  function AskUserQuestionBody({ msg, theme, variant }) {
+    const questions = Array.isArray(msg.args?.questions) ? msg.args.questions : [];
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {questions.map((q, qi) => (
+          <div key={qi} style={{
+            border: `1px solid ${theme.border}`,
+            borderRadius: variant.radiusSm,
+            background: theme.surface2,
+            padding: '8px 10px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              {q.header && (
+                <span style={{
+                  fontSize: 9.5, color: theme.textMuted,
+                  background: theme.surface, padding: '2px 6px',
+                  borderRadius: 4, fontFamily: variant.mono,
+                  border: `1px solid ${theme.border}`,
+                }}>{q.header}</span>
+              )}
+              {q.multiSelect && (
+                <span style={{ fontSize: 9.5, color: theme.textMuted, fontFamily: variant.mono }}>
+                  multi-select
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: theme.text, marginBottom: 6 }}>{q.question}</div>
+            {Array.isArray(q.options) && q.options.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {q.options.map((opt, oi) => (
+                  <div key={oi} style={{
+                    display: 'flex', gap: 6, alignItems: 'baseline',
+                    padding: '4px 8px',
+                    background: theme.surface,
+                    border: `1px solid ${theme.border}`,
+                    borderRadius: variant.radiusSm,
+                    fontSize: 11.5,
+                  }}>
+                    <span style={{ color: theme.textMuted, fontFamily: variant.mono, fontSize: 10 }}>
+                      {String.fromCharCode(65 + oi)}.
+                    </span>
+                    <span style={{ color: theme.text }}>{opt.label}</span>
+                    {opt.description && (
+                      <span style={{ color: theme.textDim, fontSize: 10.5 }}>— {opt.description}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        {msg.result && (
+          <div style={{
+            padding: '6px 10px',
+            background: theme.surface2,
+            border: `1px solid ${theme.border}`,
+            borderRadius: variant.radiusSm,
+            fontSize: 11.5, color: theme.textDim,
+            fontFamily: variant.mono,
+            whiteSpace: 'pre-wrap',
+          }}>
+            <span style={{ color: theme.textMuted }}>answer:</span> {msg.result}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function ToolCall({ msg, theme, variant }) {
-    const autoOpen = msg.tool === 'edit_file' || msg.tool === 'screenshot' || msg.status === 'fail';
+    const isAsk = msg.tool === 'AskUserQuestion';
+    const autoOpen = isAsk || msg.tool === 'edit_file' || msg.tool === 'screenshot' || msg.status === 'fail';
     const [open, setOpen] = useState(autoOpen);
     const Chev = window.Icons.ChevronDown;
-    const argStr = Object.entries(msg.args || {}).map(([k, v]) => `${k}: ${typeof v === 'string' ? '"' + v + '"' : v}`).join(', ');
+    const argStr = isAsk
+      ? (() => {
+          const qs = Array.isArray(msg.args?.questions) ? msg.args.questions : [];
+          if (!qs.length) return '';
+          const first = qs[0]?.header || qs[0]?.question || '';
+          const more = qs.length > 1 ? ` +${qs.length - 1}` : '';
+          return `${first}${more}`;
+        })()
+      : Object.entries(msg.args || {}).map(([k, v]) => `${k}: ${typeof v === 'string' ? '"' + v + '"' : v}`).join(', ');
     const failed = msg.status === 'fail';
     const toolColor = failed ? theme.status.failed : msg.status === 'ok' ? theme.status.completed : theme.accent;
     return (
@@ -276,7 +353,12 @@
             {failed ? variant.allMono ? '[fail]' : '✗' : msg.status === 'ok' ? variant.allMono ? '[ok]' : '✓' : msg.status}
           </span>
         </button>
-        {open &&
+        {open && isAsk &&
+        <div style={{ borderTop: `1px solid ${theme.border}`, padding: 10 }}>
+            <AskUserQuestionBody msg={msg} theme={theme} variant={variant} />
+          </div>
+        }
+        {open && !isAsk &&
         <div style={{ borderTop: `1px solid ${theme.border}`, padding: 10 }}>
             {msg.error &&
           <div style={{

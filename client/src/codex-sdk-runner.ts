@@ -187,14 +187,12 @@ export function startCodexRunner(opts: CodexRunnerOpts): CodexRunningSession {
 
   opts.onStatus?.("running");
 
-  // Emit a synthetic "session started" line so the transcript view has a
-  // header row, mirroring the system.init message emitted by the Claude SDK.
-  appendMessages(opts.sessionId, [{
-    ts: new Date().toISOString(),
-    role: "system",
-    kind: "system",
-    text: `Session started · model ${opts.model ?? "codex (default)"}`,
-  }]);
+  // No synthetic "Session started · model X" line — the bootstrap user
+  // message ("Session started from <origin> on host <host> via …") already
+  // tells the user the session is up and which model is on the other end,
+  // and Claude's equivalent system.init is dropped by normalize() upstream
+  // for the same reason. Recording it here would just accrete a new system
+  // row every time the client restarts and rehydrates tracked sessions.
 
   let observedThreadId = opts.codexThreadId ?? null;
 

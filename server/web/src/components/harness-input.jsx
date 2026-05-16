@@ -72,16 +72,17 @@
             padding: '6px 8px', background: 'transparent', border: 'none',
             cursor: 'pointer', color: theme.text, fontSize: 12, textAlign: 'left',
             borderRadius: variant.radiusSm,
-            fontFamily: variant.allMono ? variant.mono : 'inherit'
+            fontFamily: variant.allMono ? variant.mono : 'inherit',
+            whiteSpace: 'nowrap',
           }}
           onMouseEnter={(e) => e.currentTarget.style.background = theme.surfaceHover}
           onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-            
+
               {it.iconNode}
               {!it.iconNode && it.dot && <span style={{ width: 7, height: 7, borderRadius: '50%', background: it.dot, flexShrink: 0 }} />}
-              <span style={{ flex: 1 }}>{it.label}</span>
-              {it.hint && <span style={{ fontSize: 10, color: theme.textMuted, fontFamily: variant.mono }}>{it.hint}</span>}
-              {it.active && <span style={{ color: theme.accent, fontSize: 11 }}>●</span>}
+              <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.label}</span>
+              {it.hint && <span style={{ fontSize: 10, color: theme.textMuted, fontFamily: variant.mono, flexShrink: 0 }}>{it.hint}</span>}
+              {it.active && <span style={{ color: theme.accent, fontSize: 11, flexShrink: 0 }}>●</span>}
             </button>
           )}
         </div>

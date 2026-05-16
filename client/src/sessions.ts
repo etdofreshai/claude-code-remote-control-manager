@@ -823,18 +823,28 @@ export async function switchSession(
     return { ...entry, provider, model, effort };
   }
 
-  startQuery({
-    sessionId,
-    workingDirectory: entry.workingDirectory,
-    resume: true,
-    name: entry.name,
-    provider,
-    model,
-    effort,
-    pushBootstrap: false,
-    // No noticeText — the switch is silent. UI stages picker changes and
-    // applies them via switchSession just before the next user message.
-  }).catch((err) => console.error(`switchSession ${sessionId}: spawn failed`, err));
+  // Await the new runner so it's registered in `running` before the ACK
+  // goes out. The UI awaits the switch then immediately POSTs /message;
+  // if we fire-and-forget, sendMessage races and may spawn a duplicate
+  // runner (the abandoned one ends up holding the message, the visible
+  // one doesn't), which is what made "change effort, send" silently
+  // ignore the new level.
+  try {
+    await startQuery({
+      sessionId,
+      workingDirectory: entry.workingDirectory,
+      resume: true,
+      name: entry.name,
+      provider,
+      model,
+      effort,
+      pushBootstrap: false,
+      // No noticeText — the switch is silent. UI stages picker changes and
+      // applies them via switchSession just before the next user message.
+    });
+  } catch (err) {
+    console.error(`switchSession ${sessionId}: spawn failed`, err);
+  }
 
   return { ...entry, provider, model, effort };
 }

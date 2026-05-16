@@ -459,15 +459,67 @@
 
     useEffect(() => () => streamTimer.current && clearTimeout(streamTimer.current), []);
 
+    // When a /rename without an argument is in flight, watch the transcript
+    // for the next assistant text message and use it as the new title.
+    useEffect(() => {
+      const pending = pendingTitleRef.current;
+      if (!pending) return;
+      for (let i = baseMessages.length - 1; i >= 0; i--) {
+        const m = baseMessages[i];
+        if (m.role !== 'assistant' || m.kind !== 'text' || !m.text) continue;
+        if ((m.time ?? 0) < pending.since - 2000) break; // earlier than our request — stop
+        const title = m.text
+          .trim()
+          .split('\n')[0]
+          .replace(/^[`"'*_]+|[`"'*_.]+$/g, '')
+          .slice(0, 80);
+        if (title) {
+          handleRename(title);
+          appendOptimistic(`▾ renamed to "${title}"`, 'system');
+        }
+        pendingTitleRef.current = null;
+        break;
+      }
+    }, [baseMessages]);
+
     function appendOptimistic(text, role = 'user') {
       setLocalMessages((prev) => [...prev, { role, time: Date.now(), kind: 'text', text }]);
     }
 
+    // Tracks an in-flight model-generated rename: `since` is the wall-clock
+    // at which we sent the title request, so the watcher below can pick the
+    // next assistant text message and treat it as the new title.
+    const pendingTitleRef = useRef(null);
+
+    // When the user types `/rename` with no arg, ask the model for a short
+    // title and apply it once the response arrives. Round-trip stays visible
+    // in the transcript, bracketed by breadcrumbs so it's obvious what
+    // happened. If a model request is already in flight, the second call is
+    // a no-op.
+    function requestModelGeneratedTitle() {
+      if (pendingTitleRef.current) {
+        appendOptimistic('▾ /rename — still waiting on the previous title…', 'system');
+        return;
+      }
+      pendingTitleRef.current = { since: Date.now() };
+      appendOptimistic('▾ asking the model for a title…', 'system');
+      const prompt =
+        "Suggest a short session title summarizing this conversation so far. " +
+        "3 to 6 words, lowercase, kebab-case. " +
+        "Reply with ONLY the title — no quotes, no trailing period, no explanation.";
+      setStreaming(true);
+      if (streamTimer.current) clearTimeout(streamTimer.current);
+      streamTimer.current = setTimeout(() => setStreaming(false), 15_000);
+      Promise.resolve(actions?.onSend?.(session, prompt)).catch((err) => {
+        console.error('title request failed', err);
+        pendingTitleRef.current = null;
+        setStreaming(false);
+      });
+    }
+
     // Harness-level slash commands: intercepted in the chat input so the
-    // model never sees them and the CLI doesn't return "isn't available."
-    // Returns true if it consumed the input. Matches any /rename or /name
-    // at the start of the text so partial / no-arg variants don't fall
-    // through to the model either.
+    // model never sees them as commands and the CLI doesn't return "isn't
+    // available." Returns true if it consumed the input.
     function handleHarnessCommand(text) {
       const trimmed = text.trim();
       const m = trimmed.match(/^\/(rename|name)\b\s*(.*)$/i);
@@ -477,7 +529,7 @@
           handleRename(arg);
           appendOptimistic(`▾ renamed to "${arg}"`, 'system');
         } else {
-          appendOptimistic('▾ /rename — provide a new name: /rename <name>', 'system');
+          requestModelGeneratedTitle();
         }
         return true;
       }

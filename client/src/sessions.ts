@@ -395,14 +395,11 @@ async function startQuery(opts: {
     `query[${opts.provider}${opts.model ? "/" + opts.model : ""}@${opts.effort}]: sessionId=${opts.sessionId} resume=${opts.resume} cwd=${opts.workingDirectory}`,
   );
 
-  // Backfill the server's transcript store with the tail of the on-disk
-  // session file so resumed sessions show some history immediately instead
-  // of looking empty until new activity flows through the for-await loop.
-  // Fire-and-forget; the SDK has its own copy on disk and is the source of
-  // truth, so a push failure is non-fatal.
-  if (opts.resume) {
-    backfillFromDisk(opts.sessionId, opts.workingDirectory);
-  }
+  // Note: no automatic backfill on resume. Backfill writes replace:true,
+  // which races with concurrent recordSdkMessage(userMsg) calls in
+  // sendMessage and silently wipes the just-recorded user input.
+  // Initial-startup backfill is handled by the loop in index.ts; explicit
+  // backfill for bindExisting is triggered there.
 
   const q = query({ prompt: stream, options: queryOptions }) as any;
 
@@ -615,6 +612,9 @@ export async function bindExisting(opts: BindOpts): Promise<TrackedSession> {
     status: "starting",
   };
   upsert(entry);
+  // bindExisting adopts a session the server's transcript store has never
+  // seen — backfill the on-disk tail so it shows history immediately.
+  backfillFromDisk(sessionId, workingDirectory);
   startQuery({
     sessionId,
     workingDirectory,

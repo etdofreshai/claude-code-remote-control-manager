@@ -553,17 +553,16 @@
               }}
             />
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
+              display: 'flex', flexDirection: 'column', gap: 8,
               padding: '8px 10px',
               borderTop: `1px solid ${theme.border}`,
-              flexWrap: 'wrap',
             }}>
-              {/* Attach (bottom-left) */}
-              <IconBtn title="Attach file or image" theme={theme} variant={variant}>
-                <window.Icons.Paperclip size={13} />
-              </IconBtn>
-
-              {/* Provider/Model — one dropdown */}
+              {/* Row 1: dropdowns (model / effort / client / directory / branch) */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                flexWrap: 'wrap',
+              }}>
+                {/* Provider/Model — one dropdown */}
               <Dropdown
                 theme={theme} variant={variant} width={240}
                 trigger={(open) => (
@@ -771,12 +770,21 @@
                 </Dropdown>
               )}
 
-              <div style={{ flex: 1 }} />
+              </div>
 
-              {/* Voice (bottom-right) */}
-              <IconBtn title="Voice input" theme={theme} variant={variant}>
-                <window.Icons.Mic size={13} />
-              </IconBtn>
+              {/* Row 2: attach (left) | spacer | voice + send (right) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {/* Attach */}
+                <IconBtn title="Attach file or image" theme={theme} variant={variant}>
+                  <window.Icons.Paperclip size={13} />
+                </IconBtn>
+
+                <div style={{ flex: 1 }} />
+
+                {/* Voice */}
+                <IconBtn title="Voice input" theme={theme} variant={variant}>
+                  <window.Icons.Mic size={13} />
+                </IconBtn>
 
               {/* Send */}
               <button
@@ -803,6 +811,7 @@
                   borderRadius: 3, opacity: 0.85,
                 }}>⏎</span>
               </button>
+              </div>
             </div>
           </div>
           )}

@@ -691,9 +691,13 @@
     const showTopBar = true;
 
     // Effective screen: if user explicitly opened settings, show it; else if
-    // they have any open sessions, show chat panes; else launcher.
+    // Honor the explicitly-requested screen (launcher / settings / chat).
+    // The only auto-fallback is chat → launcher when there are no open
+    // panes to show — clicking "New session" with sessions still open
+    // should still take you back to the launcher.
     const effectiveScreen =
       screen === 'settings' ? 'settings'
+      : screen === 'launcher' ? 'launcher'
       : openSessions.length === 0 ? 'launcher'
       : 'chat';
 

@@ -463,8 +463,26 @@
       setLocalMessages((prev) => [...prev, { role, time: Date.now(), kind: 'text', text }]);
     }
 
+    // Harness-level slash commands: intercepted in the chat input so the
+    // model never sees them and the CLI doesn't return "isn't available."
+    // Each returns true if it consumed the input.
+    function handleHarnessCommand(text) {
+      const trimmed = text.trim();
+      const m = trimmed.match(/^\/(rename|name)\s+(.+)$/i);
+      if (m) {
+        const newName = m[2].trim().replace(/^["']|["']$/g, '');
+        if (newName) {
+          handleRename(newName);
+          appendOptimistic(`▾ renamed to "${newName}"`, 'system');
+        }
+        return true;
+      }
+      return false;
+    }
+
     function handleSend(text) {
       if (!session || !text) return;
+      if (handleHarnessCommand(text)) return;
       appendOptimistic(text, 'user');
       setStreaming(true);
       if (streamTimer.current) clearTimeout(streamTimer.current);

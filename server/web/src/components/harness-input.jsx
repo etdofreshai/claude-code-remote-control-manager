@@ -147,6 +147,13 @@
   function SlashMenu({ onPick, theme, variant, query }) {
     const cmds = [
     {
+      name: 'rename',
+      desc: 'Rename this session (Harness)',
+      detail: 'Renames the session locally in the Harness sidebar — does not call the model. Use the chat input rather than the pencil icon if you prefer typing.',
+      usage: '/rename <new name>',
+      flags: [{ f: '<new name>', d: 'The new session title' }]
+    },
+    {
       name: 'clear',
       desc: 'Clear conversation',
       detail: 'Removes all messages from the current session context. The session remains open but starts fresh from the next message.',

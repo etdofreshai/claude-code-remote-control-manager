@@ -65,6 +65,7 @@ function App() {
       onRenameSession: (session, name) => api.rename(session.clientName, session.sessionId, name),
       onSwitchModel: (session, provider, model, effort) =>
         api.switchSession(session.clientName, session.sessionId, { provider, model, effort }),
+      pollModels: () => api.pollModels(),
       onCreateSession: async (opts = {}) => {
         const env = opts.env || (data?.environments?.find((e) => e.connected && e.enabled)?.id);
         if (!env) throw new Error('No environment selected and none online');

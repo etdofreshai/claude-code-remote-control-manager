@@ -83,5 +83,16 @@ export function makeActions({ refresh } = {}) {
         { method: 'POST', body: { workingDirectory, page, pageSize, query } },
       );
     },
+
+    // Ask any (or a specific) online client to re-poll its upstream APIs for
+    // current model lists. Server merges results into the client's in-memory
+    // provider config and re-registers — the next /api/clients tick (and
+    // the immediate refresh below) will show the new list.
+    pollModels(clientName) {
+      return after(apiFetch(
+        '/api/clients/poll-models',
+        { method: 'POST', body: clientName ? { name: clientName } : {} },
+      ));
+    },
   };
 }

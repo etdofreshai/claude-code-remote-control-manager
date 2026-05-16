@@ -155,7 +155,8 @@ interface AgentCommand {
     | "refresh"
     | "setEnabled"
     | "switch"
-    | "message";
+    | "message"
+    | "pollModels";
   payload: {
     workingDirectory?: string;
     sessionId?: string;
@@ -361,6 +362,27 @@ function getAgentOrThrow(name: string): Agent {
 app.get("/api/clients", async () => {
   const now = Date.now();
   return [...agents.values()].map((a) => agentWithOnline(a, now));
+});
+
+// Ask any online client to query upstream APIs for the current model list.
+// We don't care which client does it — the result is the same provider map
+// either way. Caller can pin to a specific client by passing { name }.
+app.post("/api/clients/poll-models", async (req) => {
+  const body = (req.body ?? {}) as { name?: string };
+  const now = Date.now();
+  const online = [...agents.values()].filter((a) => isAgentOnline(a, now));
+  if (online.length === 0) throw new Error("no online clients to poll");
+  const target = body.name
+    ? online.find((a) => a.name === body.name)
+    : online[Math.floor(Math.random() * online.length)];
+  if (!target) throw new Error(`client ${body.name} not online`);
+  const cmd: AgentCommand = {
+    id: randomUUID(),
+    type: "pollModels",
+    payload: {},
+  };
+  const result = await enqueue(target.name, cmd);
+  return { client: target.name, result };
 });
 
 app.get("/api/clients/list", async () => {

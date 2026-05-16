@@ -51,6 +51,58 @@ function defaultProviders(): ProvidersConfig {
   };
 }
 
+/**
+ * Query upstream APIs for the current model list for each configured
+ * provider. Returns a map keyed by provider id; missing entries mean we
+ * couldn't discover (no auth, no list endpoint, network failure, etc.) and
+ * the caller should leave that provider's models untouched.
+ *
+ * Right now:
+ *   - codex: GET https://api.openai.com/v1/models with OPENAI_API_KEY,
+ *     filtered to ids matching gpt-5 / codex. Sorted newest-first.
+ *   - claude: skipped. The native Claude provider authenticates through
+ *     ~/.claude credentials (OAuth), not an API key, and there's no list
+ *     endpoint we can call with those creds.
+ */
+export async function discoverModels(): Promise<Record<string, string[]>> {
+  const out: Record<string, string[]> = {};
+  const openaiKey = process.env.OPENAI_API_KEY?.trim();
+  if (openaiKey) {
+    try {
+      const res = await fetch("https://api.openai.com/v1/models", {
+        headers: { authorization: `Bearer ${openaiKey}` },
+      });
+      if (res.ok) {
+        const body = (await res.json()) as { data?: Array<{ id: string }> };
+        const ids = (body.data ?? [])
+          .map((m) => m.id)
+          .filter((id) => /codex/i.test(id) || /^gpt-5/i.test(id))
+          // Drop dated aliases like "gpt-5-2025-08-07" — the canonical id is
+          // shorter and more stable; sortable by string descending puts the
+          // newest major versions first.
+          .filter((id) => !/-\d{4}-\d{2}-\d{2}$/.test(id))
+          .sort()
+          .reverse();
+        if (ids.length) out.codex = ids;
+      } else {
+        console.error(`discoverModels openai ${res.status}: ${await res.text().catch(() => "")}`);
+      }
+    } catch (err) {
+      console.error("discoverModels openai failed", err);
+    }
+  }
+  return out;
+}
+
+/** Replace the models array on a provider in the cached config. Used by the
+ *  `pollModels` command path so a refresh from the UI updates what we
+ *  advertise on the next register tick. */
+export function setProviderModels(providerId: string, models: string[]): void {
+  const cfg = loadProviders();
+  if (!cfg[providerId]) cfg[providerId] = { models: [] };
+  cfg[providerId].models = models;
+}
+
 let cached: ProvidersConfig | null = null;
 
 export function loadProviders(): ProvidersConfig {

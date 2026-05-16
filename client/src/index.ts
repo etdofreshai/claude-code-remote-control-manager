@@ -29,7 +29,7 @@ import {
   refreshLastMessageAtAll,
 } from "./sessions.js";
 import { listLocalSessions } from "./list.js";
-import { publicProviders } from "./providers.js";
+import { publicProviders, discoverModels, setProviderModels } from "./providers.js";
 import { backfillFromDisk } from "./transcripts.js";
 import type { Effort } from "./state.js";
 
@@ -114,7 +114,8 @@ async function pollOnce(): Promise<void> {
       | "refresh"
       | "setEnabled"
       | "switch"
-      | "message";
+      | "message"
+      | "pollModels";
     payload: {
       workingDirectory?: string;
       sessionId?: string;
@@ -191,6 +192,15 @@ async function pollOnce(): Promise<void> {
         cmd.payload.pageSize ?? 20,
         cmd.payload.query,
       );
+    } else if (cmd.type === "pollModels") {
+      const discovered = await discoverModels();
+      for (const [pId, models] of Object.entries(discovered)) {
+        setProviderModels(pId, models);
+      }
+      // Re-register so the server (and any subscribed UI) sees the fresh list
+      // immediately rather than waiting for the next 30 s heartbeat.
+      await register();
+      result = { providers: publicProviders(), discovered };
     } else {
       throw new Error(`unknown command type: ${(cmd as any).type}`);
     }

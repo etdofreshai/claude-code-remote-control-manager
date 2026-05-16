@@ -30,9 +30,19 @@ export interface TranscriptMessage {
   collapsed?: boolean;
 }
 
-const SERVER_URL = (process.env.SERVER_URL ?? "").replace(/\/+$/, "");
-const CLIENT_TOKEN = process.env.CLIENT_TOKEN ?? "";
-const AGENT_NAME = process.env.AGENT_NAME ?? os.hostname();
+// Read these lazily — ESM hoists imports above any top-level code in
+// index.ts, including its loadEnvFile() call, so anything captured at
+// module-load time here would see undefined values. Functions below
+// re-read process.env on each call.
+function getServerUrl(): string {
+  return (process.env.SERVER_URL ?? "").replace(/\/+$/, "");
+}
+function getClientToken(): string {
+  return process.env.CLIENT_TOKEN ?? "";
+}
+function getAgentName(): string {
+  return process.env.AGENT_NAME ?? os.hostname();
+}
 
 /**
  * Translate one Claude Agent SDK message into 0+ canonical transcript
@@ -145,6 +155,8 @@ async function postAppend(
   messages: TranscriptMessage[],
   replace: boolean,
 ): Promise<void> {
+  const SERVER_URL = getServerUrl();
+  const CLIENT_TOKEN = getClientToken();
   if (!SERVER_URL || !CLIENT_TOKEN) return;
   if (!messages.length && !replace) return;
   try {
@@ -154,7 +166,7 @@ async function postAppend(
         authorization: `Bearer ${CLIENT_TOKEN}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ name: AGENT_NAME, sessionId, messages, replace }),
+      body: JSON.stringify({ name: getAgentName(), sessionId, messages, replace }),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");

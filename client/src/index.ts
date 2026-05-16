@@ -1,16 +1,11 @@
+// Import-first: populates process.env from .env before any sibling import
+// captures env vars at module-load time. See load-env.ts for why.
+import "./load-env.js";
+
 import os from "node:os";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
-// tsx doesn't auto-load .env on every setup, so call Node's native loader
-// explicitly. Walks up from cwd to handle running from the client dir or
-// the repo root.
-for (const candidate of [".env", path.join("client", ".env")]) {
-  if (existsSync(candidate)) {
-    try { (process as any).loadEnvFile(candidate); break; } catch {}
-  }
-}
 import {
   startNew,
   bindExisting,

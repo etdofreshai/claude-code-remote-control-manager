@@ -465,15 +465,19 @@
 
     // Harness-level slash commands: intercepted in the chat input so the
     // model never sees them and the CLI doesn't return "isn't available."
-    // Each returns true if it consumed the input.
+    // Returns true if it consumed the input. Matches any /rename or /name
+    // at the start of the text so partial / no-arg variants don't fall
+    // through to the model either.
     function handleHarnessCommand(text) {
       const trimmed = text.trim();
-      const m = trimmed.match(/^\/(rename|name)\s+(.+)$/i);
+      const m = trimmed.match(/^\/(rename|name)\b\s*(.*)$/i);
       if (m) {
-        const newName = m[2].trim().replace(/^["']|["']$/g, '');
-        if (newName) {
-          handleRename(newName);
-          appendOptimistic(`▾ renamed to "${newName}"`, 'system');
+        const arg = m[2].trim().replace(/^["']|["']$/g, '');
+        if (arg) {
+          handleRename(arg);
+          appendOptimistic(`▾ renamed to "${arg}"`, 'system');
+        } else {
+          appendOptimistic('▾ /rename — provide a new name: /rename <name>', 'system');
         }
         return true;
       }
@@ -500,6 +504,9 @@
     }
     function handleSteer(text) {
       if (!text) return;
+      // Same harness-level intercept for mid-stream input so /rename works
+      // even while the agent is still responding.
+      if (handleHarnessCommand(text)) return;
       appendOptimistic('↪ Steer: ' + text, 'user');
       Promise.resolve(actions?.onSteer?.(session, text)).catch((err) => console.error('steer failed', err));
     }

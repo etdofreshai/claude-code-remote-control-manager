@@ -344,6 +344,19 @@ app.post("/api/logout", async (_req, reply) => {
 
 app.get("/", async (_req, reply) => reply.type("text/html").send(readIndexHtml()));
 
+// SPA fallback. Client-side routing uses /s/<id>(,<id>)* for sessions
+// and /settings — refreshing those paths shouldn't 404. Serve index.html
+// for any GET that isn't an API call or a static asset; the React app
+// then parses location.pathname and renders the right screen. JSON 404s
+// stay JSON for API misses.
+app.setNotFoundHandler((req, reply) => {
+  if (req.method === "GET" && !req.url.startsWith("/api/") && !req.url.startsWith("/static/")) {
+    reply.type("text/html").send(readIndexHtml());
+    return;
+  }
+  reply.code(404).send({ statusCode: 404, error: "Not Found", message: `Route ${req.method}:${req.url} not found` });
+});
+
 function isAgentOnline(agent: Agent, now = Date.now()): boolean {
   return now - new Date(agent.lastSeenAt).getTime() < AGENT_OFFLINE_AFTER_MS;
 }

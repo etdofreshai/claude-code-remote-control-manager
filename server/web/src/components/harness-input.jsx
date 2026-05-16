@@ -380,6 +380,10 @@
     // the environment matching this session's clientName; if none matches
     // (mid-restart, say), aggregate across all known environments. Then
     // filter by the user's enable toggles from Settings → Providers.
+    // Crucially: restrict to the session's own provider — switching
+    // providers mid-session means rebuilding the runner against a
+    // different SDK / auth stack, which is more "start a new session"
+    // than "switch model", so we don't surface cross-provider choices.
     const enabledMap = window.HarnessEnabled.useEnabledMap();
     const providers = useMemo(() => {
       const out = {};
@@ -388,6 +392,7 @@
       const pool = matching ? [matching] : envs;
       for (const e of pool) {
         for (const [pId, info] of Object.entries(e.providers || {})) {
+          if (session.provider && pId !== session.provider) continue;
           if (!out[pId]) out[pId] = { label: PROVIDER_LABELS[pId] || pId, models: [] };
           for (const m of info.models || []) {
             if (!out[pId].models.includes(m)) out[pId].models.push(m);
@@ -395,7 +400,7 @@
         }
       }
       return window.HarnessEnabled.filterProviders(out, enabledMap);
-    }, [environments, session.clientName, session.env, enabledMap]);
+    }, [environments, session.clientName, session.env, session.provider, enabledMap]);
 
     const showSlash = text.startsWith('/');
     const slashQuery = text.startsWith('/') ? text.slice(1).split(' ')[0] : '';

@@ -496,7 +496,11 @@
         .catch((err) => console.error('delete failed', err));
     }
     function handleSwitchModel(provider, model, effort) {
-      Promise.resolve(actions?.onSwitchModel?.(session, provider, model, effort)).catch((err) => console.error('switch failed', err));
+      // Return the promise so callers (InputBox.fire → maybeSwitchFirst)
+      // can `await` the switch and only send the message once the runner
+      // has been respawned with the new config.
+      return Promise.resolve(actions?.onSwitchModel?.(session, provider, model, effort))
+        .catch((err) => { console.error('switch failed', err); });
     }
 
     return (

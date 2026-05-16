@@ -34,6 +34,8 @@
 
   function VariantDropdown({ tweaks, setTweak, theme, variant }) {
     const [open, setOpen] = React.useState(false);
+    const anchorRef = useRef(null);
+    const pos = window.HarnessPopover.usePopoverPlacement(open, anchorRef, { preferred: 'down' });
     const variants = [
       { id: 'Eclipse', tagline: 'Dense · monochrome · indigo' },
       { id: 'Ember', tagline: 'Warm · rounded · coral' },
@@ -41,7 +43,7 @@
     ];
     const current = tweaks.variant || 'Eclipse';
     return (
-      <div style={{ position: 'relative' }}>
+      <div ref={anchorRef} style={{ position: 'relative' }}>
         <TopBarIconBtn
           onClick={() => setOpen(!open)}
           title={`Variant: ${current}`}
@@ -55,7 +57,8 @@
           <>
             <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
             <div style={{
-              position: 'absolute', top: '100%', right: 0, marginTop: 6,
+              position: 'absolute', right: 0,
+              ...window.HarnessPopover.popoverStyle(pos),
               background: theme.surface2,
               border: `1px solid ${theme.borderStrong}`,
               borderRadius: variant.radius,

@@ -44,11 +44,22 @@
   }
 
   function Menu({ items, onPick, theme, variant, onClose, align = 'left' }) {
+    // Anchor to the popover's parent (the position: relative wrapper that
+    // also holds the trigger). The Menu mounts on open, so a one-time
+    // measurement on mount is enough.
+    const ref = useRef(null);
+    const [pos, setPos] = useState({ dir: 'up', maxHeight: 320 });
+    useEffect(() => {
+      const anchor = ref.current?.parentElement?.parentElement; // <fragment>'s wrapper
+      const parentWrapper = ref.current?.offsetParent || anchor;
+      setPos(window.HarnessPopover.placePopover(parentWrapper, { preferred: 'up' }));
+    }, []);
     return (
       <>
         <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
-        <div style={{
-          position: 'absolute', bottom: '100%', [align]: 0, marginBottom: 6,
+        <div ref={ref} style={{
+          position: 'absolute', [align]: 0,
+          ...window.HarnessPopover.popoverStyle(pos),
           background: theme.surface2,
           border: `1px solid ${theme.borderStrong}`,
           borderRadius: variant.radius,

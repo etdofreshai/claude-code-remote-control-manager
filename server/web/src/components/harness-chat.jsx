@@ -777,6 +777,8 @@
 
   function ViewDropdown({ value, onChange, theme, variant }) {
     const [open, setOpen] = useState(false);
+    const anchorRef = useRef(null);
+    const pos = window.HarnessPopover.usePopoverPlacement(open, anchorRef, { preferred: 'down' });
     const views = [
     { id: 'transcript', label: 'Transcript', hint: 'Full rich view with tools' },
     { id: 'conversation', label: 'Conversation', hint: 'User + assistant only' },
@@ -786,7 +788,7 @@
 
     const current = views.find((v) => v.id === value) || views[0];
     return (
-      <div style={{ position: 'relative' }}>
+      <div ref={anchorRef} style={{ position: 'relative' }}>
         <button
           onClick={() => setOpen(!open)}
           title="Change view"
@@ -810,7 +812,8 @@
         <>
             <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
             <div style={{
-            position: 'absolute', top: '100%', right: 0, marginTop: 6,
+            position: 'absolute', right: 0,
+            ...window.HarnessPopover.popoverStyle(pos),
             background: theme.surface2,
             border: `1px solid ${theme.borderStrong}`,
             borderRadius: variant.radius,

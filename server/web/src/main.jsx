@@ -9,6 +9,7 @@ import './globals.js';
 
 import './components/harness-theme.js';
 import './components/harness-enabled.js';
+import './components/harness-popover.js';
 import './components/tweaks-panel.jsx';
 import './components/harness-icons.jsx';
 import './components/harness-providers.jsx';

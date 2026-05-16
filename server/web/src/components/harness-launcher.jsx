@@ -28,10 +28,12 @@
     return loadLastCwds()[envId] || null;
   }
 
-  function Dropdown({ trigger, children, theme, variant, align = 'left', width = 220 }) {
+  function Dropdown({ trigger, children, theme, variant, align = 'left', width = 220, preferred = 'auto' }) {
     const [open, setOpen] = useState(false);
+    const anchorRef = useRef(null);
+    const pos = window.HarnessPopover.usePopoverPlacement(open, anchorRef, { preferred });
     return (
-      <div style={{ position: 'relative' }}>
+      <div ref={anchorRef} style={{ position: 'relative' }}>
         <div onClick={() => setOpen(!open)} style={{ display: 'inline-flex' }}>
           {trigger(open)}
         </div>
@@ -39,13 +41,13 @@
           <>
             <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
             <div style={{
-              position: 'absolute', bottom: '100%', [align]: 0, marginBottom: 6,
+              position: 'absolute', [align]: 0,
+              ...window.HarnessPopover.popoverStyle(pos),
               background: theme.surface2,
               border: `1px solid ${theme.borderStrong}`,
               borderRadius: variant.radius,
               padding: 4, minWidth: width, zIndex: 51,
               boxShadow: '0 12px 32px rgba(0,0,0,0.4)',
-              maxHeight: 320, overflowY: 'auto',
             }}>
               {typeof children === 'function' ? children({ close: () => setOpen(false) }) : children}
             </div>

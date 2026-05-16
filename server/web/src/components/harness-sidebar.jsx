@@ -431,8 +431,10 @@
   function PickerPill({ label, value, options, onChange, theme, variant, hideLabel }) {
     const [open, setOpen] = useState(false);
     const current = options.find(o => o.id === value);
+    const anchorRef = useRef(null);
+    const pos = window.HarnessPopover.usePopoverPlacement(open, anchorRef, { preferred: 'down' });
     return (
-      <div style={{ position: 'relative' }}>
+      <div ref={anchorRef} style={{ position: 'relative' }}>
         <button
           onClick={() => setOpen(!open)}
           style={{
@@ -450,7 +452,8 @@
           <>
             <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
             <div style={{
-              position: 'absolute', top: '100%', left: 0, marginTop: 4,
+              position: 'absolute', left: 0,
+              ...window.HarnessPopover.popoverStyle(pos, 4),
               background: theme.surface2, border: `1px solid ${theme.borderStrong}`,
               borderRadius: variant.radius, padding: 4, minWidth: 180,
               boxShadow: '0 8px 24px rgba(0,0,0,0.3)',

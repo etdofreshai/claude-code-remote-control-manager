@@ -28,6 +28,27 @@
     return loadLastCwds()[envId] || null;
   }
 
+  // Same pattern for the last-picked client itself — separate keys for
+  // Code mode and Bind mode so they don't trample each other.
+  const LAST_CLIENT_KEY = 'hrn:lastClient';      // { code?: string, bind?: string }
+  function loadLastClients() {
+    try {
+      const raw = typeof window !== 'undefined' && window.localStorage?.getItem(LAST_CLIENT_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+  function saveLastClient(mode, envId) {
+    if (!envId) return;
+    try {
+      const all = loadLastClients();
+      all[mode] = envId;
+      window.localStorage?.setItem(LAST_CLIENT_KEY, JSON.stringify(all));
+    } catch {}
+  }
+  function rememberedClient(mode) {
+    return loadLastClients()[mode] || null;
+  }
+
   function Dropdown({ trigger, children, theme, variant, align = 'left', width = 220, preferred = 'auto' }) {
     const [open, setOpen] = useState(false);
     const anchorRef = useRef(null);
@@ -388,22 +409,45 @@
     const [provider, setProvider] = useState('claude');
     const [model, setModel] = useState('sonnet');
     const [effort, setEffort] = useState('medium');
-    const [cwd, setCwd] = useState(null);
+    // Seed env + cwd from localStorage so the launcher remembers the last
+    // client + directory the user picked. The "still online" check happens
+    // in an effect below — if the saved client isn't connected any more we
+    // clear it so the picker doesn't show a stale name.
+    const initialEnv = rememberedClient('code');
+    const initialCwd = rememberedCwd(initialEnv);
+    const [cwd, setCwd] = useState(initialCwd);
     const [branch, setBranch] = useState('main');
-    const [env, setEnv] = useState(null);
+    const [env, setEnv] = useState(initialEnv);
     const [cwdCustom, setCwdCustom] = useState(false);
     // Bind mode keeps its own client/directory selection, separate from Code
     // mode's env/cwd: the client defaults to none (nothing else shows until
     // one is picked), the directory list is scoped to the chosen client, and
     // the directory can be a custom typed path.
-    const [bindEnv, setBindEnv] = useState(null);
-    const [bindCwd, setBindCwd] = useState(null);
+    const initialBindEnv = rememberedClient('bind');
+    const initialBindCwd = rememberedCwd(initialBindEnv);
+    const [bindEnv, setBindEnv] = useState(initialBindEnv);
+    const [bindCwd, setBindCwd] = useState(initialBindCwd);
     const [bindCwdCustom, setBindCwdCustom] = useState(false);
     const taRef = useRef(null);
 
     const environments = data.environments || [];
     const gitRepos = data.gitRepos || [];
     const isGitRepo = gitRepos.includes(cwd);
+
+    // Drop a remembered env if it's no longer in the client list (renamed,
+    // disconnected and removed, etc.) so the picker doesn't show stale UI.
+    useEffect(() => {
+      if (env && !environments.some(e => e.id === env)) {
+        setEnv(null);
+        setCwd(null);
+        setCwdCustom(false);
+      }
+      if (bindEnv && !environments.some(e => e.id === bindEnv)) {
+        setBindEnv(null);
+        setBindCwd(null);
+        setBindCwdCustom(false);
+      }
+    }, [environments, env, bindEnv]);
 
     // Code mode — directories scoped to the selected client (host); same
     // shape as bindCwds. Feeds the directory dropdown once a client is picked.
@@ -660,7 +704,7 @@
                           <DropdownItem
                             key={e.id}
                             active={e.id === env}
-                            onClick={() => { if (!offline) { setEnv(e.id); const last = rememberedCwd(e.id); setCwd(last); setCwdCustom(false); setBranch('main'); close(); } }}
+                            onClick={() => { if (!offline) { setEnv(e.id); saveLastClient('code', e.id); const last = rememberedCwd(e.id); setCwd(last); setCwdCustom(false); setBranch('main'); close(); } }}
                             theme={theme} variant={variant}
                             icon={<span style={{
                               width: 7, height: 7, borderRadius: '50%',
@@ -856,7 +900,7 @@
                           <DropdownItem
                             key={e.id}
                             active={e.id === bindEnv}
-                            onClick={() => { if (!offline) { setBindEnv(e.id); setBindCwd(rememberedCwd(e.id)); setBindCwdCustom(false); close(); } }}
+                            onClick={() => { if (!offline) { setBindEnv(e.id); saveLastClient('bind', e.id); setBindCwd(rememberedCwd(e.id)); setBindCwdCustom(false); close(); } }}
                             theme={theme} variant={variant}
                             icon={<span style={{
                               width: 7, height: 7, borderRadius: '50%',

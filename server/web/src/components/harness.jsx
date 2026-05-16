@@ -393,7 +393,7 @@
 
   function ChatScreen({ session, messages, theme, variant, tweaks, onSend, onStop, onSteer, isStreaming, onKill, onRevive, environments, gitRepos, onRename, onArchive, onDelete, onSwitchModel, onLoadOlder, hasOlder, loadingOlder }) {
     return (
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: theme.bg }}>
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, background: theme.bg }}>
         <window.ChatLog
           messages={messages}
           theme={theme} variant={variant}
@@ -746,12 +746,12 @@
             }} />
           }
           {effectiveScreen === 'chat' && openSessions.length > 0 &&
-            <div style={{ flex: 1, display: 'flex', minWidth: 0 }}>
+            <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>
               {openSessions.map((s, i) => (
                 <div
                   key={s.id}
                   style={{
-                    flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column',
+                    flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column',
                     borderLeft: i > 0 ? `1px solid ${theme.border}` : 'none',
                   }}
                 >

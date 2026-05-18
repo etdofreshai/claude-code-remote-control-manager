@@ -56,6 +56,7 @@ export class ClaudeSdkController implements ClaudeController {
 
   private async spawn(input: { sessionId: string; cwd: string; resume: boolean; name?: string; text?: string }): Promise<RunningSession> {
     if (this.running.has(input.sessionId)) return this.running.get(input.sessionId)!;
+    assertCwdExists(input.cwd);
     const stream = createMessageStream();
     const abort = new AbortController();
     if (!input.resume) stream.push(userMessage(input.text?.trim() || "Remote control session started. No reply needed."));
@@ -108,6 +109,22 @@ export class ClaudeSdkController implements ClaudeController {
     try { session.abort.abort(); } catch { /* noop */ }
     try { session.close(); } catch { /* noop */ }
   }
+}
+
+// Node's child_process.spawn fails with ENOENT when the supplied cwd doesn't
+// exist — and the Claude SDK surfaces that as "native binary ... exists but
+// failed to launch", which points at the wrong file. Fail early with a clear
+// message instead.
+function assertCwdExists(cwd: string): void {
+  if (!cwd) throw new Error("cwd is empty");
+  let stats;
+  try {
+    stats = statSync(cwd);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code ?? "unknown";
+    throw new Error(`cwd does not exist on this client: ${cwd} (${code})`);
+  }
+  if (!stats.isDirectory()) throw new Error(`cwd is not a directory: ${cwd}`);
 }
 
 function choosePermissionMode(): string {

@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import { helpJson, helpMarkdown } from "./help.js";
 import { RemoteControlState } from "./state.js";
 
 export interface CreateAppOptions {
@@ -11,7 +12,7 @@ export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
   const app = Fastify({ logger: process.env.LOG_LEVEL ? { level: process.env.LOG_LEVEL } : false });
 
   app.addHook("preHandler", async (req: FastifyRequest, reply: FastifyReply) => {
-    if (req.url === "/healthz") return;
+    if (req.url === "/healthz" || req.url === "/help") return;
     const auth = req.headers.authorization;
     if (auth !== `Bearer ${token}`) {
       reply.code(401).send({ error: "unauthorized" });
@@ -19,6 +20,13 @@ export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
   });
 
   app.get("/healthz", async () => ({ ok: true }));
+
+  app.get("/help", async (_req, reply) => {
+    reply.type("text/markdown; charset=utf-8");
+    return helpMarkdown;
+  });
+
+  app.get("/api/help", async () => helpJson());
 
   app.get("/api/clients", async () => state.listClients());
 

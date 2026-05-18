@@ -66,3 +66,24 @@ test("unauthorized requests are rejected", async () => {
   assert.equal(res.statusCode, 401);
   await app.close();
 });
+
+test("help endpoints expose docs", async () => {
+  const { app } = fixture();
+  await app.ready();
+
+  const publicHelp = await app.inject({ method: "GET", url: "/help" });
+  assert.equal(publicHelp.statusCode, 200);
+  assert.match(publicHelp.body, /Claude Code Remote Control Manager Help/);
+  assert.match(publicHelp.headers["content-type"] ?? "", /text\/markdown/);
+
+  const apiHelpUnauthed = await app.inject({ method: "GET", url: "/api/help" });
+  assert.equal(apiHelpUnauthed.statusCode, 401);
+
+  const apiHelp = await app.inject({ method: "GET", url: "/api/help", headers: auth });
+  assert.equal(apiHelp.statusCode, 200);
+  assert.equal(apiHelp.json().name, "Claude Code Remote Control Manager");
+  assert.ok(apiHelp.json().ccrcEndpoints.some((endpoint: { path: string }) => endpoint.path === "/api/clients"));
+  assert.ok(apiHelp.json().claudeAiRemoteEndpoints.some((endpoint: { path: string }) => endpoint.path.includes("/v1/sessions")));
+
+  await app.close();
+});

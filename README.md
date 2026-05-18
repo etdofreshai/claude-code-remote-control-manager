@@ -99,6 +99,25 @@ Stop remote control:
 Ctrl-C
 ```
 
+### Forward local Claude.ai OAuth through the server proxy
+
+The client includes a helper that reads the local Claude Code credential from `~/.claude/.credentials.json`, forwards only the OAuth access token for a single request, and lists live Claude.ai sessions through the server proxy. The server does not store the Claude.ai credential.
+
+```bash
+cd client
+npm run build
+npm run claude-ai:sessions -- --server https://ccrcm.etdofresh.com --token "$CCRC_TOKEN" --limit 25
+```
+
+Optional environment:
+
+```bash
+CLAUDE_CREDENTIALS_PATH=~/.claude/.credentials.json
+CLAUDE_AI_ORGANIZATION_UUID=your-organization-uuid
+```
+
+If Claude.ai returns a Cloudflare page or a 403 from the deployed server, the OAuth token alone is not enough from that network; use a browser cookie via `X-Claude-AI-Cookie` or move this call to the desktop client network.
+
 ## Docker
 
 There are separate Dockerfiles for the server and client.

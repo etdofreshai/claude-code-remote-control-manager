@@ -1,0 +1,39 @@
+services:
+  ccrc-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    environment:
+      PORT: "3000"
+      REMOTE_TOKEN: ${REMOTE_TOKEN:?set REMOTE_TOKEN}
+      STATE_FILE: /data/state.json
+    volumes:
+      - ccrc-server-data:/data
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  # Optional hosted/container test client. This is useful to prove the full
+  # server -> client -> Claude Code command path works in Dokploy: the server
+  # can command this client to create/resume a remote-controlled session.
+  # It controls Claude Code inside this container, not your physical desktop/laptop.
+  ccrc-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    environment:
+      CCRC_SERVER_URL: ${CCRC_SERVER_URL:-http://ccrc-server:3000}
+      CCRC_TOKEN: ${REMOTE_TOKEN:?set REMOTE_TOKEN}
+      CCRC_NAME: ${CCRC_NAME:-dokploy-client}
+      CCRC_PERMISSION_MODE: ${CCRC_PERMISSION_MODE:-bypassPermissions}
+    volumes:
+      - ccrc-client-claude:/home/node/.claude
+      - ccrc-client-workspace:/workspace
+    depends_on:
+      - ccrc-server
+    restart: unless-stopped
+
+volumes:
+  ccrc-server-data:
+  ccrc-client-claude:
+  ccrc-client-workspace:

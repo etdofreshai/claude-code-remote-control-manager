@@ -1,21 +1,16 @@
 {
-  "name": "ccrcm-server",
+  "name": "ccrc-server",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "build:web": "npm --prefix ./web install && npm --prefix ./web run build",
-    "build:all": "npm run build:web && npm run build",
+    "test": "node --import tsx --test test/*.test.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "fastify": "^5.0.0",
-    "@fastify/static": "^8.0.0",
-    "@fastify/cookie": "^11.0.0",
-    "@fastify/formbody": "^8.0.0",
-    "cron-parser": "^4.9.0"
+    "fastify": "^5.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

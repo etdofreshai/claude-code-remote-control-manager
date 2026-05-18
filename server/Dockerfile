@@ -1,37 +1,27 @@
-# ─── Stage 1: build the SPA with Vite ───────────────────────────────
-FROM node:20-alpine AS web-builder
-WORKDIR /web
-COPY server/web/package*.json ./
-RUN npm install
-COPY server/web ./
-# Vite emits to ../public (relative to /web), i.e. /public
+# syntax=docker/dockerfile:1
+
+FROM node:22-bookworm-slim AS deps
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+
+FROM deps AS build
+COPY tsconfig.json ./
+COPY src ./src
 RUN npm run build
 
-# ─── Stage 2: compile the server TypeScript ─────────────────────────
-FROM node:20-alpine AS server-builder
+FROM node:22-bookworm-slim AS runtime
+ENV NODE_ENV=production \
+    PORT=3000 \
+    STATE_FILE=/data/state.json
 WORKDIR /app
-ARG BUILD_SHA=
-ARG BUILD_DATETIME=
-RUN apk add --no-cache git
-COPY server/package*.json ./
-RUN npm install
-COPY server/tsconfig.json ./
-COPY server/src ./src
-# .git is included so we can read the commit sha at build time. It is NOT
-# copied into the runtime stage below, so the final image never ships .git.
-COPY .git ./.git
-RUN npm run build \
-    && sha="${BUILD_SHA:-$(git rev-parse --short HEAD 2>/dev/null || echo dev)}" \
-    && dt="${BUILD_DATETIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" \
-    && printf '{"sha":"%s","datetime":"%s"}\n' "$sha" "$dt" > dist/version.json \
-    && cat dist/version.json
-
-# ─── Stage 3: runtime ───────────────────────────────────────────────
-FROM node:20-alpine
-WORKDIR /app
-COPY server/package*.json ./
-RUN npm install --omit=dev
-COPY --from=server-builder /app/dist ./dist
-COPY --from=web-builder /public ./public
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+COPY --from=build /app/dist ./dist
+RUN mkdir -p /data && chown -R node:node /data /app
+USER node
 EXPOSE 3000
+VOLUME ["/data"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "dist/index.js"]

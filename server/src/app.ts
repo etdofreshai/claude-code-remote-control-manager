@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import { registerClaudeAiProxyRoutes } from "./claude-ai-proxy.js";
 import { helpJson, helpMarkdown } from "./help.js";
 import { RemoteControlState } from "./state.js";
 
@@ -27,6 +28,8 @@ export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
   });
 
   app.get("/api/help", async () => helpJson());
+
+  registerClaudeAiProxyRoutes(app);
 
   app.get("/api/clients", async () => state.listClients());
 

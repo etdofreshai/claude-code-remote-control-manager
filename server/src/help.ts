@@ -36,6 +36,13 @@ export const ccrcEndpoints: HelpEndpoint[] = [
   { method: "GET", path: "/api/agent/poll", auth: "bearer", description: "Client long-polls for queued commands." },
   { method: "POST", path: "/api/agent/ack", auth: "bearer", description: "Client acknowledges a command result." },
   { method: "POST", path: "/api/agent/disconnect", auth: "bearer", description: "Client disconnect notification." },
+  { method: "GET", path: "/api/claude-ai/sessions", auth: "bearer", description: "Proxy Claude.ai session list using per-request forwarded Claude.ai auth." },
+  { method: "GET", path: "/api/claude-ai/sessions/:sessionId", auth: "bearer", description: "Proxy one Claude.ai session metadata request." },
+  { method: "GET", path: "/api/claude-ai/sessions/:sessionId/events", auth: "bearer", description: "Proxy Claude.ai session event history request." },
+  { method: "POST", path: "/api/claude-ai/sessions/:sessionId/events", auth: "bearer", description: "Proxy a Claude.ai user event/message post." },
+  { method: "POST", path: "/api/claude-ai/code/sessions/:controlSessionId/presence", auth: "bearer", description: "Proxy Claude.ai browser presence for a control session." },
+  { method: "POST", path: "/api/claude-ai/github/batch-branch-status", auth: "bearer", description: "Proxy Claude.ai GitHub branch status helper." },
+  { method: "POST", path: "/api/claude-ai/sessions/:sessionId/git/compare", auth: "bearer", description: "Proxy Claude.ai git compare helper for a session." },
 ];
 
 export const claudeAiRemoteEndpoints: HelpEndpoint[] = [
@@ -102,6 +109,7 @@ ${remoteOperatorPrompt}
 ## Notes
 
 - The CCRC bearer token controls connected clients. Treat it as powerful.
+- Claude.ai proxy endpoints are stateless wrappers. Pass Claude.ai credentials per request with \`X-Claude-AI-Cookie\` or \`X-Claude-AI-Authorization\`; the server does not persist them.
 - For Windows clients, pass the real local path, for example \`D:\\Projects\\knight-rider\`, not reconstructed metadata such as \`d//Projects/knight/rider\`.
 - Claude.ai APIs listed here are observational from a HAR and should be treated as internal/private API behavior.
 `;

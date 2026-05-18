@@ -83,7 +83,19 @@ test("help endpoints expose docs", async () => {
   assert.equal(apiHelp.statusCode, 200);
   assert.equal(apiHelp.json().name, "Claude Code Remote Control Manager");
   assert.ok(apiHelp.json().ccrcEndpoints.some((endpoint: { path: string }) => endpoint.path === "/api/clients"));
+  assert.ok(apiHelp.json().ccrcEndpoints.some((endpoint: { path: string }) => endpoint.path === "/api/claude-ai/sessions"));
   assert.ok(apiHelp.json().claudeAiRemoteEndpoints.some((endpoint: { path: string }) => endpoint.path.includes("/v1/sessions")));
+
+  await app.close();
+});
+
+test("claude.ai proxy requires forwarded Claude.ai auth", async () => {
+  const { app } = fixture();
+  await app.ready();
+
+  const missing = await app.inject({ method: "GET", url: "/api/claude-ai/sessions", headers: auth });
+  assert.equal(missing.statusCode, 400);
+  assert.match(missing.body, /missing forwarded Claude\.ai auth/);
 
   await app.close();
 });

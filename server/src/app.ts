@@ -87,6 +87,22 @@ export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
     return state.enqueueStop(name, { sessionId });
   });
 
+  app.delete("/api/clients/:name/sessions/:sessionId", async (req, reply) => {
+    const { name, sessionId } = req.params as { name: string; sessionId: string };
+    const deleted = state.deleteReportedSession(name, sessionId);
+    if (!deleted) {
+      reply.code(404).send({ error: `session ${sessionId} not found on client ${name}` });
+      return;
+    }
+    return { deleted: true, sessionId };
+  });
+
+  app.delete("/api/clients/:name/sessions", async (req) => {
+    const { name } = req.params as { name: string };
+    const count = state.deleteAllReportedSessions(name);
+    return { deleted: count, client: name };
+  });
+
   app.post("/api/clients/:name/disconnect", async (req) => {
     const { name } = req.params as { name: string };
     return state.enqueueDisconnect(name);

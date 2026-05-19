@@ -158,6 +158,41 @@ export class RemoteControlState {
     this.save();
   }
 
+  /**
+   * Delete a single reported session from a client.
+   * Returns true if found and deleted, false otherwise.
+   */
+  deleteReportedSession(nameInput: string, sessionId: string): boolean {
+    const name = normalizeName(nameInput);
+    const prev = this.clients.get(name);
+    if (!prev) return false;
+    const before = prev.reportedSessions.length;
+    const sessions = prev.reportedSessions.filter((s: any) => {
+      const id = typeof s === "object" && s !== null ? s.sessionId ?? s.id : s;
+      return id !== sessionId;
+    });
+    if (sessions.length === before) return false;
+    // Also remove from desired sessions
+    const desired = prev.desiredSessions.filter((s) => s.sessionId !== sessionId);
+    this.clients.set(name, { ...prev, reportedSessions: sessions, desiredSessions: desired });
+    this.save();
+    return true;
+  }
+
+  /**
+   * Delete all reported sessions from a client.
+   * Returns the count of deleted sessions.
+   */
+  deleteAllReportedSessions(nameInput: string): number {
+    const name = normalizeName(nameInput);
+    const prev = this.clients.get(name);
+    if (!prev) return 0;
+    const count = prev.reportedSessions.length;
+    this.clients.set(name, { ...prev, reportedSessions: [], desiredSessions: [] });
+    this.save();
+    return count;
+  }
+
   enqueueListSessions(clientName: string): Promise<unknown> {
     return this.enqueue(normalizeName(clientName), "list-sessions", {});
   }

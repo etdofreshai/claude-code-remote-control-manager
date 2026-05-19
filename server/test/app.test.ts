@@ -27,6 +27,14 @@ test("agent connect and operator list clients", async () => {
   assert.equal(list.statusCode, 200);
   assert.equal(list.json()[0].name, "desktop");
   assert.equal(list.json()[0].online, true);
+  assert.deepEqual(list.json()[0].knownSessions, []);
+  assert.deepEqual(list.json()[0].pinnedSessions, []);
+  assert.equal("reportedSessions" in list.json()[0], false);
+  assert.equal("desiredSessions" in list.json()[0], false);
+
+  const sessions = await app.inject({ method: "GET", url: "/api/clients/desktop/sessions", headers: auth });
+  assert.equal(sessions.statusCode, 200);
+  assert.deepEqual(sessions.json(), { knownSessions: [], pinnedSessions: [] });
 
   await app.close();
 });
@@ -104,8 +112,8 @@ test("operator can delete offline clients but not online clients without force",
   const { app, state } = fixture();
   await app.ready();
 
-  await app.inject({ method: "POST", url: "/api/agent/connect", headers: auth, payload: { name: "offline-client", reportedSessions: [{ sessionId: "s1" }] } });
-  state.rememberDesiredSession("offline-client", {
+  await app.inject({ method: "POST", url: "/api/agent/connect", headers: auth, payload: { name: "offline-client", knownSessions: [{ sessionId: "s1" }] } });
+  state.pinSession("offline-client", {
     sessionId: "77777777-7777-4777-8777-777777777777",
     cwd: "/repo",
     remoteControl: true,

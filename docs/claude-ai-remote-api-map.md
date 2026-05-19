@@ -994,7 +994,7 @@ These are the local CCRC endpoints, separate from Claude.ai APIs:
 - `GET /api/help` — JSON endpoint inventory
 - `GET /api/clients` — List connected/known clients
 - `GET /api/clients/:name` — Inspect one client
-- `GET /api/clients/:name/sessions` — List desired and reported sessions
+- `GET /api/clients/:name/sessions` — List known and pinned sessions
 - `POST /api/clients/:name/sessions/list` — Ask client to refresh local sessions
 - `POST /api/clients/:name/sessions/new` — Start a new local Claude Code remote-control session
 - `POST /api/clients/:name/sessions/resume` — Resume/bind an existing local Claude Code session

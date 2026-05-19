@@ -10,7 +10,7 @@ export interface RemoteCommand {
   payload: Record<string, unknown>;
 }
 
-export interface DesiredSession {
+export interface PinnedSession {
   sessionId: string;
   cwd: string;
   name?: string;
@@ -23,16 +23,19 @@ export interface ClientInfo {
   connectedAt: string;
   lastSeenAt: string;
   online: boolean;
-  reportedSessions: unknown[];
-  desiredSessions: DesiredSession[];
+  knownSessions: unknown[];
+  pinnedSessions: PinnedSession[];
 }
 
 interface PersistedClient {
   name: string;
   connectedAt?: string;
   lastSeenAt?: string;
+  knownSessions?: unknown[];
+  pinnedSessions?: PinnedSession[];
+  // Legacy persisted field names; read for migration, do not write.
   reportedSessions?: unknown[];
-  desiredSessions?: DesiredSession[];
+  desiredSessions?: PinnedSession[];
 }
 
 interface PersistedState {
@@ -72,7 +75,7 @@ export class RemoteControlState {
     this.load();
   }
 
-  connectClient(input: { name: string; reportedSessions?: unknown[] }): ClientInfo {
+  connectClient(input: { name: string; knownSessions?: unknown[]; reportedSessions?: unknown[] }): ClientInfo {
     const name = normalizeName(input.name);
     const now = new Date().toISOString();
     const prev = this.clients.get(name);
@@ -81,13 +84,13 @@ export class RemoteControlState {
       connectedAt: prev?.connectedAt ?? now,
       lastSeenAt: now,
       online: true,
-      reportedSessions: input.reportedSessions ?? prev?.reportedSessions ?? [],
-      desiredSessions: prev?.desiredSessions ?? [],
+      knownSessions: input.knownSessions ?? input.reportedSessions ?? prev?.knownSessions ?? [],
+      pinnedSessions: prev?.pinnedSessions ?? [],
     };
     this.clients.set(name, client);
     this.save();
 
-    for (const session of client.desiredSessions.filter((s) => s.remoteControl)) {
+    for (const session of client.pinnedSessions.filter((s) => s.remoteControl)) {
       this.enqueueFireAndForget(name, "resume", {
         sessionId: session.sessionId,
         cwd: session.cwd,
@@ -95,7 +98,7 @@ export class RemoteControlState {
         remoteControl: true,
       });
     }
-    return { ...client, desiredSessions: [...client.desiredSessions] };
+    return { ...client, pinnedSessions: [...client.pinnedSessions] };
   }
 
   disconnectClient(nameInput: string): void {
@@ -110,10 +113,10 @@ export class RemoteControlState {
   reportSessions(nameInput: string, sessions: unknown[]): ClientInfo {
     const name = normalizeName(nameInput);
     const prev = this.clients.get(name) ?? this.connectClient({ name });
-    const next = { ...prev, reportedSessions: sessions, lastSeenAt: new Date().toISOString(), online: true };
+    const next = { ...prev, knownSessions: sessions, lastSeenAt: new Date().toISOString(), online: true };
     this.clients.set(name, next);
     this.save();
-    return { ...next, desiredSessions: [...next.desiredSessions] };
+    return { ...next, pinnedSessions: [...next.pinnedSessions] };
   }
 
   listClients(): ClientInfo[] {
@@ -121,8 +124,8 @@ export class RemoteControlState {
     return [...this.clients.values()].map((client) => ({
       ...client,
       online: client.online && now - Date.parse(client.lastSeenAt) < this.offlineAfterMs,
-      desiredSessions: [...client.desiredSessions],
-      reportedSessions: [...client.reportedSessions],
+      pinnedSessions: [...client.pinnedSessions],
+      knownSessions: [...client.knownSessions],
     }));
   }
 
@@ -131,64 +134,64 @@ export class RemoteControlState {
     return this.listClients().find((client) => client.name === name);
   }
 
-  rememberDesiredSession(nameInput: string, session: DesiredSession): void {
+  pinSession(nameInput: string, session: PinnedSession): void {
     const name = normalizeName(nameInput);
     const prev = this.clients.get(name) ?? {
       name,
       connectedAt: new Date().toISOString(),
       lastSeenAt: new Date().toISOString(),
       online: false,
-      reportedSessions: [],
-      desiredSessions: [],
+      knownSessions: [],
+      pinnedSessions: [],
     };
-    const desired = prev.desiredSessions.filter((s) => s.sessionId !== session.sessionId);
-    desired.push({ ...session });
-    this.clients.set(name, { ...prev, desiredSessions: desired });
+    const pinned = prev.pinnedSessions.filter((s) => s.sessionId !== session.sessionId);
+    pinned.push({ ...session });
+    this.clients.set(name, { ...prev, pinnedSessions: pinned });
     this.save();
   }
 
-  forgetDesiredSession(nameInput: string, sessionId: string): void {
+  forgetPinnedSession(nameInput: string, sessionId: string): void {
     const name = normalizeName(nameInput);
     const prev = this.clients.get(name);
     if (!prev) return;
     this.clients.set(name, {
       ...prev,
-      desiredSessions: prev.desiredSessions.filter((s) => s.sessionId !== sessionId),
+      pinnedSessions: prev.pinnedSessions.filter((s) => s.sessionId !== sessionId),
     });
     this.save();
   }
 
   /**
-   * Delete a single reported session from a client.
+   * Delete a single known session from a client.
    * Returns true if found and deleted, false otherwise.
    */
-  deleteReportedSession(nameInput: string, sessionId: string): boolean {
+  deleteKnownSession(nameInput: string, sessionId: string): boolean {
     const name = normalizeName(nameInput);
     const prev = this.clients.get(name);
     if (!prev) return false;
-    const before = prev.reportedSessions.length;
-    const sessions = prev.reportedSessions.filter((s: any) => {
+    const before = prev.knownSessions.length;
+    const sessions = prev.knownSessions.filter((s: any) => {
       const id = typeof s === "object" && s !== null ? s.sessionId ?? s.id : s;
       return id !== sessionId;
     });
     if (sessions.length === before) return false;
-    // Also remove from desired sessions
-    const desired = prev.desiredSessions.filter((s) => s.sessionId !== sessionId);
-    this.clients.set(name, { ...prev, reportedSessions: sessions, desiredSessions: desired });
+    // Also remove from pinned sessions
+    const pinned = prev.pinnedSessions.filter((s) => s.sessionId !== sessionId);
+    this.clients.set(name, { ...prev, knownSessions: sessions, pinnedSessions: pinned });
     this.save();
     return true;
   }
 
   /**
-   * Delete all reported sessions from a client.
+   * Delete all known sessions from a client.
    * Returns the count of deleted sessions.
    */
-  deleteAllReportedSessions(nameInput: string): number {
+  deleteAllKnownSessions(nameInput: string): number {
     const name = normalizeName(nameInput);
     const prev = this.clients.get(name);
     if (!prev) return 0;
-    const count = prev.reportedSessions.length;
-    this.clients.set(name, { ...prev, reportedSessions: [], desiredSessions: [] });
+    const count = prev.knownSessions.length;
+    this.clients.set(name, { ...prev, knownSessions: [], pinnedSessions: [] });
     this.save();
     return count;
   }
@@ -227,7 +230,7 @@ export class RemoteControlState {
     return this.enqueue(normalizeName(clientName), "start", { ...payload, remoteControl: true }).then((result) => {
       const sessionId = sessionIdFromResult(result);
       if (sessionId) {
-        this.rememberDesiredSession(clientName, {
+        this.pinSession(clientName, {
           sessionId,
           cwd: payload.cwd,
           name: payload.name,
@@ -242,7 +245,7 @@ export class RemoteControlState {
   enqueueResume(clientName: string, payload: { sessionId: string; cwd: string; name?: string }): Promise<unknown> {
     if (!payload.sessionId || !payload.cwd) throw new Error("sessionId and cwd required");
     const name = normalizeName(clientName);
-    this.rememberDesiredSession(name, {
+    this.pinSession(name, {
       sessionId: payload.sessionId,
       cwd: payload.cwd,
       name: payload.name,
@@ -262,7 +265,7 @@ export class RemoteControlState {
 
   enqueueStop(clientName: string, payload: { sessionId: string }): Promise<unknown> {
     if (!payload.sessionId) throw new Error("sessionId required");
-    this.forgetDesiredSession(clientName, payload.sessionId);
+    this.forgetPinnedSession(clientName, payload.sessionId);
     return this.enqueue(normalizeName(clientName), "stop", payload);
   }
 
@@ -346,8 +349,8 @@ export class RemoteControlState {
         connectedAt: client.connectedAt ?? new Date().toISOString(),
         lastSeenAt: client.lastSeenAt ?? new Date().toISOString(),
         online: false,
-        reportedSessions: client.reportedSessions ?? [],
-        desiredSessions: client.desiredSessions ?? [],
+        knownSessions: client.knownSessions ?? client.reportedSessions ?? [],
+        pinnedSessions: client.pinnedSessions ?? client.desiredSessions ?? [],
       });
     }
   }
@@ -360,8 +363,8 @@ export class RemoteControlState {
         name,
         connectedAt: client.connectedAt,
         lastSeenAt: client.lastSeenAt,
-        reportedSessions: client.reportedSessions,
-        desiredSessions: client.desiredSessions,
+        knownSessions: client.knownSessions,
+        pinnedSessions: client.pinnedSessions,
       };
     }
     writeFileSync(this.stateFile, JSON.stringify({ clients }, null, 2));

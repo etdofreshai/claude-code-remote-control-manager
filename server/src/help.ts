@@ -10,9 +10,9 @@ export const ccrcEndpoints: HelpEndpoint[] = [
   { method: "GET", path: "/healthz", auth: "none", description: "Public health check." },
   { method: "GET", path: "/help", auth: "none", description: "Human-readable CCRC and Claude.ai remote-control API notes." },
   { method: "GET", path: "/api/help", auth: "bearer", description: "Machine-readable endpoint inventory and remote-control notes." },
-  { method: "GET", path: "/api/clients", auth: "bearer", description: "List known clients, online state, reported sessions, and desired sessions." },
-  { method: "GET", path: "/api/clients/:name", auth: "bearer", description: "Inspect one client by name." },
-  { method: "GET", path: "/api/clients/:name/sessions", auth: "bearer", description: "List desired and reported sessions for one client." },
+  { method: "GET", path: "/api/clients", auth: "bearer", description: "List known clients, online state, known sessions, and pinned sessions." },
+  { method: "GET", path: "/api/clients/:name", auth: "bearer", description: "Inspect one client." },
+  { method: "GET", path: "/api/clients/:name/sessions", auth: "bearer", description: "List known and pinned sessions for one client." },
   { method: "POST", path: "/api/clients/:name/sessions/list", auth: "bearer", description: "Ask a connected client to refresh/list local Claude sessions." },
   {
     method: "POST",

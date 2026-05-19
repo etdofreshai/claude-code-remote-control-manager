@@ -61,7 +61,7 @@ PORT=3000
 STATE_FILE=./data/state.json
 ```
 
-The server persists desired remote-control sessions in `STATE_FILE`. If the server restarts, connected clients can reconnect. On reconnect, the server queues `resume` commands for persisted desired sessions so the client can re-enable remote control.
+The server persists pinned remote-control sessions in `STATE_FILE`. If the server restarts, connected clients can reconnect. On reconnect, the server queues `resume` commands for pinned sessions so the client can re-enable remote control.
 
 ## Client
 
@@ -279,8 +279,8 @@ Implemented first:
 - Create/resume sessions with remote control enabled.
 - Send messages.
 - Stop sessions.
-- Server persistence of desired remote-controlled sessions.
-- Reconnect behavior queues resume commands for desired sessions.
+- Server persistence of pinned remote-controlled sessions.
+- Reconnect behavior queues resume commands for pinned sessions.
 - Dockerfiles for server/client and a Dokploy-oriented compose file.
 
 Deferred intentionally:

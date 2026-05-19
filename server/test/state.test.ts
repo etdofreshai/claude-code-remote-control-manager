@@ -1,16 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { RemoteControlState } from "../src/state.ts";
 
-test("connect registers a client and queues persisted desired sessions for restart", async () => {
+test("connect registers a client and queues persisted pinned sessions for restart", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ccrc-state-"));
   const stateFile = path.join(dir, "state.json");
   const state = new RemoteControlState({ stateFile, pollTimeoutMs: 5, ackTimeoutMs: 50 });
 
-  state.rememberDesiredSession("desktop", {
+  state.pinSession("desktop", {
     sessionId: "11111111-1111-4111-8111-111111111111",
     cwd: "/home/et/repos/app",
     name: "app",
@@ -31,7 +31,7 @@ test("connect registers a client and queues persisted desired sessions for resta
   });
 });
 
-test("new session command persists returned session id as desired remote-control state", async () => {
+test("new session command persists returned session id as pinned remote-control state", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ccrc-state-"));
   const stateFile = path.join(dir, "state.json");
   const state = new RemoteControlState({ stateFile, pollTimeoutMs: 5, ackTimeoutMs: 100 });
@@ -46,15 +46,15 @@ test("new session command persists returned session id as desired remote-control
   assert.deepEqual(result, { sessionId: "22222222-2222-4222-8222-222222222222" });
 
   const saved = JSON.parse(readFileSync(stateFile, "utf8"));
-  assert.equal(saved.clients.laptop.desiredSessions[0].sessionId, "22222222-2222-4222-8222-222222222222");
-  assert.equal(saved.clients.laptop.desiredSessions[0].remoteControl, true);
+  assert.equal(saved.clients.laptop.pinnedSessions[0].sessionId, "22222222-2222-4222-8222-222222222222");
+  assert.equal(saved.clients.laptop.pinnedSessions[0].remoteControl, true);
 });
 
-test("disconnect marks client offline but keeps desired sessions for later reconnect", () => {
+test("disconnect marks client offline but keeps pinned sessions for later reconnect", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ccrc-state-"));
   const state = new RemoteControlState({ stateFile: path.join(dir, "state.json") });
   state.connectClient({ name: "desktop" });
-  state.rememberDesiredSession("desktop", {
+  state.pinSession("desktop", {
     sessionId: "33333333-3333-4333-8333-333333333333",
     cwd: "/repo",
     remoteControl: true,
@@ -64,10 +64,10 @@ test("disconnect marks client offline but keeps desired sessions for later recon
 
   const client = state.listClients()[0];
   assert.equal(client.online, false);
-  assert.equal(client.desiredSessions.length, 1);
+  assert.equal(client.pinnedSessions.length, 1);
 });
 
-test("resume for an offline known client persists desired session without waiting for ack", async () => {
+test("resume for an offline known client persists pinned session without waiting for ack", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ccrc-state-"));
   const state = new RemoteControlState({ stateFile: path.join(dir, "state.json"), pollTimeoutMs: 5, ackTimeoutMs: 20 });
   state.connectClient({ name: "desktop" });
@@ -81,7 +81,7 @@ test("resume for an offline known client persists desired session without waitin
 
   assert.deepEqual(result, { queuedForReconnect: true, sessionId: "55555555-5555-4555-8555-555555555555" });
   const reconnect = state.connectClient({ name: "desktop" });
-  assert.equal(reconnect.desiredSessions.length, 1);
+  assert.equal(reconnect.pinnedSessions.length, 1);
   const cmd = await state.takeNextCommand("desktop");
   assert.equal(cmd?.type, "resume");
   assert.equal(cmd?.payload.sessionId, "55555555-5555-4555-8555-555555555555");
@@ -91,8 +91,8 @@ test("deleteClient removes offline client state and persists removal", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ccrc-state-"));
   const stateFile = path.join(dir, "state.json");
   const state = new RemoteControlState({ stateFile });
-  state.connectClient({ name: "old-client", reportedSessions: [{ sessionId: "a" }] });
-  state.rememberDesiredSession("old-client", {
+  state.connectClient({ name: "old-client", knownSessions: [{ sessionId: "a" }] });
+  state.pinSession("old-client", {
     sessionId: "66666666-6666-4666-8666-666666666666",
     cwd: "/repo",
     remoteControl: true,
@@ -114,4 +114,29 @@ test("deleteClient refuses online clients unless forced", () => {
   assert.ok(state.getClient("active-client"));
   assert.deepEqual(state.deleteClient("active-client", { force: true }), { deleted: true, online: true });
   assert.equal(state.getClient("active-client"), undefined);
+});
+
+test("loads legacy reportedSessions/desiredSessions state into knownSessions/pinnedSessions", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccrc-state-"));
+  const stateFile = path.join(dir, "state.json");
+  writeFileSync(
+    stateFile,
+    JSON.stringify({
+      clients: {
+        legacy: {
+          connectedAt: "2026-01-01T00:00:00.000Z",
+          lastSeenAt: "2026-01-01T00:00:00.000Z",
+          reportedSessions: [{ sessionId: "legacy-known" }],
+          desiredSessions: [{ sessionId: "legacy-pinned", cwd: "/repo", remoteControl: true }],
+        },
+      },
+    }),
+  );
+
+  const state = new RemoteControlState({ stateFile });
+  const client = state.getClient("legacy");
+  assert.deepEqual(client?.knownSessions, [{ sessionId: "legacy-known" }]);
+  assert.deepEqual(client?.pinnedSessions, [{ sessionId: "legacy-pinned", cwd: "/repo", remoteControl: true }]);
+  assert.equal((client as unknown as { reportedSessions?: unknown[] })?.reportedSessions, undefined);
+  assert.equal((client as unknown as { desiredSessions?: unknown[] })?.desiredSessions, undefined);
 });

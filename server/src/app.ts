@@ -51,8 +51,8 @@ export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
       return;
     }
     return {
-      desiredSessions: client.desiredSessions,
-      reportedSessions: client.reportedSessions,
+      pinnedSessions: client.pinnedSessions,
+      knownSessions: client.knownSessions,
     };
   });
 
@@ -89,7 +89,7 @@ export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
 
   app.delete("/api/clients/:name/sessions/:sessionId", async (req, reply) => {
     const { name, sessionId } = req.params as { name: string; sessionId: string };
-    const deleted = state.deleteReportedSession(name, sessionId);
+    const deleted = state.deleteKnownSession(name, sessionId);
     if (!deleted) {
       reply.code(404).send({ error: `session ${sessionId} not found on client ${name}` });
       return;
@@ -99,7 +99,7 @@ export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
 
   app.delete("/api/clients/:name/sessions", async (req) => {
     const { name } = req.params as { name: string };
-    const count = state.deleteAllReportedSessions(name);
+    const count = state.deleteAllKnownSessions(name);
     return { deleted: count, client: name };
   });
 
@@ -124,9 +124,9 @@ export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
   });
 
   app.post("/api/agent/connect", async (req) => {
-    const body = (req.body ?? {}) as { name?: string; reportedSessions?: unknown[] };
+    const body = (req.body ?? {}) as { name?: string; knownSessions?: unknown[]; reportedSessions?: unknown[] };
     if (!body.name) throw new Error("name required");
-    return state.connectClient({ name: body.name, reportedSessions: body.reportedSessions });
+    return state.connectClient({ name: body.name, knownSessions: body.knownSessions, reportedSessions: body.reportedSessions });
   });
 
   app.post("/api/agent/sessions", async (req) => {

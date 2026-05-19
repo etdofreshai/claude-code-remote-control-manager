@@ -99,3 +99,34 @@ test("claude.ai proxy requires forwarded Claude.ai auth", async () => {
 
   await app.close();
 });
+
+test("operator can delete offline clients but not online clients without force", async () => {
+  const { app, state } = fixture();
+  await app.ready();
+
+  await app.inject({ method: "POST", url: "/api/agent/connect", headers: auth, payload: { name: "offline-client", reportedSessions: [{ sessionId: "s1" }] } });
+  state.rememberDesiredSession("offline-client", {
+    sessionId: "77777777-7777-4777-8777-777777777777",
+    cwd: "/repo",
+    remoteControl: true,
+  });
+  state.disconnectClient("offline-client");
+
+  const deleted = await app.inject({ method: "DELETE", url: "/api/clients/offline-client", headers: auth });
+  assert.equal(deleted.statusCode, 200);
+  assert.deepEqual(deleted.json(), { deleted: true, client: "offline-client", wasOnline: false, forced: false });
+
+  const missing = await app.inject({ method: "GET", url: "/api/clients/offline-client", headers: auth });
+  assert.equal(missing.statusCode, 404);
+
+  await app.inject({ method: "POST", url: "/api/agent/connect", headers: auth, payload: { name: "online-client" } });
+  const blocked = await app.inject({ method: "DELETE", url: "/api/clients/online-client", headers: auth });
+  assert.equal(blocked.statusCode, 409);
+  assert.equal(blocked.json().online, true);
+
+  const forced = await app.inject({ method: "DELETE", url: "/api/clients/online-client?force=true", headers: auth });
+  assert.equal(forced.statusCode, 200);
+  assert.deepEqual(forced.json(), { deleted: true, client: "online-client", wasOnline: true, forced: true });
+
+  await app.close();
+});

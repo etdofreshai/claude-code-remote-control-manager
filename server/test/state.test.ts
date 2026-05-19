@@ -86,3 +86,32 @@ test("resume for an offline known client persists desired session without waitin
   assert.equal(cmd?.type, "resume");
   assert.equal(cmd?.payload.sessionId, "55555555-5555-4555-8555-555555555555");
 });
+
+test("deleteClient removes offline client state and persists removal", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccrc-state-"));
+  const stateFile = path.join(dir, "state.json");
+  const state = new RemoteControlState({ stateFile });
+  state.connectClient({ name: "old-client", reportedSessions: [{ sessionId: "a" }] });
+  state.rememberDesiredSession("old-client", {
+    sessionId: "66666666-6666-4666-8666-666666666666",
+    cwd: "/repo",
+    remoteControl: true,
+  });
+  state.disconnectClient("old-client");
+
+  assert.deepEqual(state.deleteClient("old-client"), { deleted: true, online: false });
+  assert.equal(state.getClient("old-client"), undefined);
+  const saved = JSON.parse(readFileSync(stateFile, "utf8"));
+  assert.equal(saved.clients["old-client"], undefined);
+});
+
+test("deleteClient refuses online clients unless forced", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccrc-state-"));
+  const state = new RemoteControlState({ stateFile: path.join(dir, "state.json") });
+  state.connectClient({ name: "active-client" });
+
+  assert.deepEqual(state.deleteClient("active-client"), { deleted: false, online: true });
+  assert.ok(state.getClient("active-client"));
+  assert.deepEqual(state.deleteClient("active-client", { force: true }), { deleted: true, online: true });
+  assert.equal(state.getClient("active-client"), undefined);
+});

@@ -193,6 +193,31 @@ export class RemoteControlState {
     return count;
   }
 
+  /**
+   * Delete a client record and all cached session state.
+   * By default, online clients are protected because they can immediately re-report.
+   */
+  deleteClient(nameInput: string, options: { force?: boolean } = {}): { deleted: boolean; online?: boolean } {
+    const name = normalizeName(nameInput);
+    const current = this.getClient(name);
+    if (!current) return { deleted: false };
+    if (current.online && !options.force) return { deleted: false, online: true };
+
+    this.clients.delete(name);
+    this.queues.delete(name);
+    this.releaseWaiters(name);
+
+    for (const [commandId, pending] of this.pending.entries()) {
+      if (pending.clientName !== name) continue;
+      clearTimeout(pending.timer);
+      pending.reject(new Error(`client deleted: ${name}`));
+      this.pending.delete(commandId);
+    }
+
+    this.save();
+    return { deleted: true, online: current.online };
+  }
+
   enqueueListSessions(clientName: string): Promise<unknown> {
     return this.enqueue(normalizeName(clientName), "list-sessions", {});
   }

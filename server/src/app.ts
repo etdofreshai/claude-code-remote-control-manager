@@ -103,6 +103,21 @@ export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
     return { deleted: count, client: name };
   });
 
+  app.delete("/api/clients/:name", async (req, reply) => {
+    const { name } = req.params as { name: string };
+    const force = (req.query as { force?: string | boolean }).force === true || (req.query as { force?: string }).force === "true";
+    const result = state.deleteClient(name, { force });
+    if (!result.deleted && result.online) {
+      reply.code(409).send({ error: `client ${name} is online; disconnect it first or pass force=true`, online: true });
+      return;
+    }
+    if (!result.deleted) {
+      reply.code(404).send({ error: `unknown client: ${name}` });
+      return;
+    }
+    return { deleted: true, client: name, wasOnline: result.online === true, forced: force };
+  });
+
   app.post("/api/clients/:name/disconnect", async (req) => {
     const { name } = req.params as { name: string };
     return state.enqueueDisconnect(name);

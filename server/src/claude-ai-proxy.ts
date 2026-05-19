@@ -20,6 +20,23 @@ function firstHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
+/**
+ * Mapping of X-Claude-AI-* forwarded headers to their upstream Claude.ai equivalents.
+ * Callers prefix headers with X-Claude-AI- to make forwarding explicit.
+ * Special cases handled below: cookie → cookie, authorization → authorization.
+ */
+const FORWARDED_HEADER_MAP: Record<string, string> = {
+  "x-claude-ai-organization-uuid": "x-organization-uuid",
+  "x-claude-ai-client-platform": "anthropic-client-platform",
+  "x-claude-ai-version": "anthropic-version",
+  "x-claude-ai-beta": "anthropic-beta",
+  "x-claude-ai-client-feature": "anthropic-client-feature",
+  "x-claude-ai-client-version": "anthropic-client-version",
+  "x-claude-ai-client-sha": "anthropic-client-sha",
+  "x-claude-ai-anonymous-id": "anthropic-anonymous-id",
+  "x-claude-ai-device-id": "anthropic-device-id",
+};
+
 function requireForwardedClaudeAuth(req: FastifyRequest): Headers {
   const cookie = firstHeader(req.headers["x-claude-ai-cookie"]);
   const authorization = firstHeader(req.headers["x-claude-ai-authorization"]);
@@ -37,11 +54,11 @@ function requireForwardedClaudeAuth(req: FastifyRequest): Headers {
   if (cookie) headers.set("cookie", cookie);
   if (authorization) headers.set("authorization", authorization);
 
-  const organizationUuid = firstHeader(req.headers["x-claude-ai-organization-uuid"]);
-  if (organizationUuid) headers.set("x-organization-uuid", organizationUuid);
-
-  const anthropicClientPlatform = firstHeader(req.headers["x-claude-ai-client-platform"]);
-  if (anthropicClientPlatform) headers.set("anthropic-client-platform", anthropicClientPlatform);
+  // Forward all mapped headers
+  for (const [inbound, upstream] of Object.entries(FORWARDED_HEADER_MAP)) {
+    const value = firstHeader(req.headers[inbound]);
+    if (value) headers.set(upstream, value);
+  }
 
   return headers;
 }

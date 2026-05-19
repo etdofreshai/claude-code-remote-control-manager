@@ -1,0 +1,82 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { ClientRuntime } from "../src/runtime.ts";
+import type { ClaudeController, RemoteCommand, ServerApi } from "../src/types.ts";
+
+class FakeClaude implements ClaudeController {
+  calls: Array<{ name: string; args: unknown }> = [];
+  async listSessions() {
+    this.calls.push({ name: "listSessions", args: {} });
+    return [{ sessionId: "existing", cwd: "/repo" }];
+  }
+  async startSession(input: { cwd: string; name?: string; text?: string }) {
+    this.calls.push({ name: "startSession", args: input });
+    return { sessionId: "new-session", cwd: input.cwd, name: input.name };
+  }
+  async resumeSession(input: { sessionId: string; cwd: string; name?: string }) {
+    this.calls.push({ name: "resumeSession", args: input });
+    return { sessionId: input.sessionId, cwd: input.cwd, name: input.name };
+  }
+  async sendMessage(input: { sessionId: string; text: string }) {
+    this.calls.push({ name: "sendMessage", args: input });
+    return { sent: true };
+  }
+  async stopSession(sessionId: string) {
+    this.calls.push({ name: "stopSession", args: sessionId });
+    return { stopped: true };
+  }
+  async shutdown() {
+    this.calls.push({ name: "shutdown", args: {} });
+  }
+}
+
+class FakeServer implements ServerApi {
+  acks: unknown[] = [];
+  disconnects: string[] = [];
+  reports: unknown[] = [];
+  constructor(public commands: Array<RemoteCommand | null>) {}
+  async connect() { return { ok: true }; }
+  async poll() { return this.commands.shift() ?? null; }
+  async ack(id: string, body: { ok: boolean; result?: unknown; error?: string }) { this.acks.push({ id, ...body }); }
+  async disconnect(name: string) { this.disconnects.push(name); }
+  async reportSessions(name: string, sessions: unknown[]) { this.reports.push({ name, sessions }); }
+}
+
+test("runtime starts, resumes, lists, sends, and stops sessions from commands", async () => {
+  const claude = new FakeClaude();
+  const server = new FakeServer([
+    { id: "1", type: "start", payload: { cwd: "/repo", name: "repo", text: "hello" } },
+    { id: "2", type: "resume", payload: { cwd: "/repo", sessionId: "old", name: "old" } },
+    { id: "3", type: "list-sessions", payload: {} },
+    { id: "4", type: "message", payload: { sessionId: "old", text: "continue" } },
+    { id: "5", type: "stop", payload: { sessionId: "old" } },
+    { id: "6", type: "disconnect", payload: {} },
+  ]);
+  const runtime = new ClientRuntime({ name: "desktop", server, claude });
+
+  await runtime.runUntilDisconnected();
+
+  assert.deepEqual(claude.calls.map((c) => c.name).filter((name) => name !== "listSessions"), [
+    "startSession",
+    "resumeSession",
+    "sendMessage",
+    "stopSession",
+    "shutdown",
+  ]);
+  assert.equal(server.acks.length, 6);
+  assert.deepEqual(server.disconnects, ["desktop"]);
+});
+
+test("runtime acknowledges command errors without crashing", async () => {
+  const claude = new FakeClaude();
+  const server = new FakeServer([
+    { id: "bad", type: "message", payload: { sessionId: "missing" } },
+    { id: "bye", type: "disconnect", payload: {} },
+  ]);
+  const runtime = new ClientRuntime({ name: "desktop", server, claude });
+
+  await runtime.runUntilDisconnected();
+
+  assert.equal((server.acks[0] as any).ok, false);
+  assert.match((server.acks[0] as any).error, /text required/);
+});

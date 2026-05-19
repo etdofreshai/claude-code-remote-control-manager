@@ -1,92 +1,295 @@
 # claude-code-remote-control-manager
 
-Lightweight remote orchestration for Claude Agent SDK sessions across multiple machines.
+Minimal on-demand remote control for Claude Code sessions.
 
-Two services:
-- **server** — browser UI, client registry, request orchestration. Public domain.
-- **client** — runs on remote machines, wraps Claude Agent SDK locally.
+This rewrite intentionally removes the old web UI, schedules, provider matrix, bridge service, Codex support, and transcript database. The goal is small and explicit:
+
+```text
+Start server once.
+Run a temporary client command on the desktop/laptop when you intentionally want remote control.
+Stop the client with Ctrl-C when you are done.
+```
 
 ## Architecture
 
-```
-Browser UI → Server → Client Agent → Claude Agent SDK → Claude Code
+```text
+Hermes / curl / operator CLI
+        ↓ Bearer token API
+ccrc-server
+        ↓ long-poll command queue
+ccrc-client, intentionally running on desktop/laptop
+        ↓
+local Claude Code via @anthropic-ai/claude-agent-sdk
+        ↓
+Claude remote control in claude.ai/code / Claude mobile
 ```
 
-## Quick start
+The client only provides:
 
-### Server
+- its `name`
+- the shared token
+- the server URL
 
-```
+Everything else is commanded through the server API.
+
+## Safety model
+
+- No broad SSH shell.
+- No always-on desktop daemon required.
+- No browser UI.
+- No arbitrary generic command endpoint.
+- Remote control is available only while `ccrc-client` is intentionally running.
+- Client shutdown calls `enableRemoteControl(false)` for active sessions and then disconnects.
+
+Important caveat: the HTTP API does not expose a generic shell endpoint, but a remote-controlled Claude Code session can still perform powerful actions through Claude Code tools according to the permission mode and filesystem access of the client process. Treat `CCRCM_TOKEN` / `CCRC_TOKEN` as a powerful secret and expose the server only on trusted networks or behind trusted auth.
+
+## Server
+
+```bash
 cd server
 cp .env.example .env
 npm install
-npm run build:web    # one-time: install + build the Vite SPA into ./public
-npm run dev          # start Fastify on :3000 (serves the built SPA at /)
+npm run build
+npm start
 ```
 
-Open http://localhost:3000 and log in with `UI_PASSWORD`.
+Environment:
 
-For active UI development, run the Vite dev server in a second terminal — it
-hot-reloads and proxies `/api/*` to Fastify:
-
-```
-cd server/web
-npm install
-npm run dev          # http://localhost:5173
+```bash
+CCRCM_TOKEN=change-me
+PORT=3000
+STATE_FILE=./data/state.json
 ```
 
-Clients register themselves at runtime; there's no manual UI entry. See
-**Client** below.
+The server persists desired remote-control sessions in `STATE_FILE`. If the server restarts, connected clients can reconnect. On reconnect, the server queues `resume` commands for persisted desired sessions so the client can re-enable remote control.
 
-Useful server API endpoints:
+## Client
 
-- `GET /api/clients` — full client objects with embedded sessions, used by the UI
-- `GET /api/clients/list` — compact list of clients with online state and session counts
-- `GET /api/clients/:name/sessions` — sessions for a single client plus client metadata
-- `POST /api/clients/:name/sessions/:sessionId/message` — send text or content blocks to a running session
+Run this manually on the machine you want to expose temporarily:
 
-### Client
-
-```
+```bash
 cd client
-cp .env.example .env       # set SERVER_URL + CLIENT_TOKEN (must match server)
+cp .env.example .env
 npm install
-npm run dev
+npm run build
+node dist/index.js --server http://SERVER:3000 --token change-me --name desktop
 ```
 
-The client must run on a machine where Claude Code and the Claude Agent SDK are
-installed. On startup it:
+Or with env vars:
 
-1. POSTs `/api/agent/register` with `{name, hostname, platform, providers, ...}`
-   using `Authorization: Bearer ${CLIENT_TOKEN}`. The same token authorizes
-   every subsequent agent request.
-2. Long-polls `GET /api/agent/poll?name=<name>` (25 s timeout). When the server
-   has a queued command (new/bind/list/rename/switch/message/etc.) it responds;
-   the client executes it locally and posts the result to `POST /api/agent/ack`.
-3. Periodically reports its current session list via `POST /api/agent/sessions`.
+```bash
+CCRC_SERVER_URL=http://SERVER:3000 \
+CCRC_TOKEN=change-me \
+CCRC_NAME=desktop \
+node dist/index.js
+```
 
-The server marks a client "online" if it has been seen in the last 60 s
-(`AGENT_OFFLINE_AFTER_MS`). Polling implicitly refreshes the last-seen
-timestamp, so an idle client stays online by polling.
+Optional permission mode override:
 
-Multiple clients can register against one server — each is identified by its
-`name` (defaults to `os.hostname()`, overridable via `AGENT_NAME`).
+```bash
+CCRC_PERMISSION_MODE=default
+CCRC_PERMISSION_MODE=bypassPermissions
+```
 
-## Env
+By default, non-root clients use `bypassPermissions`; root clients fall back to `default` because Claude Code refuses dangerous permission bypass as root.
 
-### Server (`server/.env`)
-- `UI_PASSWORD` — UI login password
-- `CLIENT_TOKEN` — shared bearer token sent to clients
-- `PORT` — default `3000`
-- `CLIENTS` — optional JSON array `[{"name":"laptop","baseUrl":"https://..."}]`
+Stop remote control:
 
-### Client (`client/.env`)
-- `CLIENT_TOKEN` — shared bearer token (must match server)
-- `PORT` — default `4000`
-- Native Anthropic auth comes from `~/.claude/.credentials.json` (OAuth). Do not set `ANTHROPIC_API_KEY` — the binary treats it as a long-lived API key and pops an interactive prompt, breaking headless use.
-- Gateway tokens (optional, only for gateway-routed providers): `LITELLM_TOKEN`, `SWITCHBOARD_API_KEY`, `ZAI_API_KEY`.
+```text
+Ctrl-C
+```
 
-## Deployment
+### Forward local Claude.ai OAuth through the server proxy
 
-Two Dockerfiles, one per service: `server/Dockerfile` and `client/Dockerfile`.
-Deployed via Dokploy as separate applications. The server is given a public domain; the client is reached over HTTP from the server using its `baseUrl`.
+The client includes a helper that reads the local Claude Code credential from `~/.claude/.credentials.json`, forwards only the OAuth access token for a single request, and lists live Claude.ai sessions through the server proxy. The server does not store the Claude.ai credential.
+
+```bash
+cd client
+npm run build
+npm run claude-ai:sessions -- --server https://ccrcm.etdofresh.com --token "$CCRC_TOKEN" --limit 25
+```
+
+Optional environment:
+
+```bash
+CLAUDE_CREDENTIALS_PATH=~/.claude/.credentials.json
+CLAUDE_AI_ORGANIZATION_UUID=your-organization-uuid
+```
+
+If Claude.ai returns a Cloudflare page or a 403 from the deployed server, the OAuth token alone is not enough from that network; use a browser cookie via `X-Claude-AI-Cookie` or move this call to the desktop client network.
+
+## Docker
+
+There are separate Dockerfiles for the server and client.
+
+### Server image
+
+```bash
+docker build -t ccrc-server ./server
+docker run --rm -p 3000:3000 \
+  -e CCRCM_TOKEN=change-me \
+  -e STATE_FILE=/data/state.json \
+  -v ccrc-server-data:/data \
+  ccrc-server
+```
+
+### Client image
+
+The client container controls Claude Code inside that container. To control your actual desktop/laptop, build and run this image on that desktop/laptop and mount the relevant Claude auth/workspace paths.
+
+```bash
+docker build -t ccrc-client ./client
+docker run --rm \
+  -e CCRC_SERVER_URL=http://SERVER:3000 \
+  -e CCRC_TOKEN=change-me \
+  -e CCRC_NAME=desktop \
+  -v "$HOME/.claude:/home/node/.claude" \
+  -v "$HOME:/workspace" \
+  ccrc-client
+```
+
+## Dokploy
+
+`docker-compose.dokploy.yml` is included for a two-service Dokploy deployment:
+
+- `ccrc-server`: persistent API server with `/data/state.json`.
+- `ccrc-client`: optional hosted/container test client.
+
+The Dokploy client is useful for proving the full command path works: call the server API, have it command the connected Dokploy client, and verify the client creates/resumes a Claude Code remote-control session. That proves the same server API will work with a desktop/laptop client later.
+
+Important: a client deployed on Dokploy controls Claude Code inside the Dokploy container, not your physical desktop/laptop. To create an actual Claude Code session from that container, the container needs usable Claude auth in `/home/node/.claude` or equivalent Claude Code environment/auth setup, plus a workspace mounted at `/workspace`.
+
+Required compose env:
+
+```bash
+CCRCM_TOKEN=change-me
+```
+
+Optional compose env:
+
+```bash
+CCRC_SERVER_URL=http://ccrc-server:3000
+CCRC_NAME=dokploy-client
+CCRC_PERMISSION_MODE=bypassPermissions
+```
+
+## API
+
+All endpoints except `/healthz` require:
+
+```http
+Authorization: Bearer change-me
+```
+
+### Health
+
+```bash
+curl http://localhost:3000/healthz
+```
+
+### List connected clients
+
+```bash
+curl -H "Authorization: Bearer change-me" \
+  http://localhost:3000/api/clients
+```
+
+### List sessions known by a client
+
+This asks the client to enumerate local Claude Code session files and running sessions.
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer change-me" \
+  http://localhost:3000/api/clients/desktop/sessions/list
+```
+
+Cached server view:
+
+```bash
+curl -H "Authorization: Bearer change-me" \
+  http://localhost:3000/api/clients/desktop/sessions
+```
+
+### Create a new remote-controlled Claude Code session
+
+```bash
+curl -X POST http://localhost:3000/api/clients/desktop/sessions/new \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cwd": "/home/et/repos/my-project",
+    "name": "my-project",
+    "text": "Run the tests and summarize failures."
+  }'
+```
+
+The returned `sessionId` is persisted by the server as a desired remote-control session.
+
+### Resume a Claude Code session with remote control
+
+```bash
+curl -X POST http://localhost:3000/api/clients/desktop/sessions/resume \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cwd": "/home/et/repos/my-project",
+    "sessionId": "00000000-0000-4000-8000-000000000000",
+    "name": "my-project"
+  }'
+```
+
+### Send a message to a running session
+
+```bash
+curl -X POST http://localhost:3000/api/clients/desktop/sessions/SESSION_ID/message \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Continue and fix the first failure."}'
+```
+
+### Stop a session
+
+Stops the local SDK runner, disables Claude remote control, and removes the persisted desired session on the server.
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer change-me" \
+  http://localhost:3000/api/clients/desktop/sessions/SESSION_ID/stop
+```
+
+### Disconnect a client
+
+Ask the client to shut down.
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer change-me" \
+  http://localhost:3000/api/clients/desktop/disconnect
+```
+
+## Current scope
+
+Implemented first:
+
+- Claude Code only.
+- Minimal API server.
+- Intentional client process.
+- Client session listing.
+- Create/resume sessions with remote control enabled.
+- Send messages.
+- Stop sessions.
+- Server persistence of desired remote-controlled sessions.
+- Reconnect behavior queues resume commands for desired sessions.
+- Dockerfiles for server/client and a Dokploy-oriented compose file.
+
+Deferred intentionally:
+
+- Codex.
+- OpenCode.
+- Web UI.
+- Schedules/cron.
+- Transcript browser/database.
+- Provider/model switching.
+- Anthropic/OpenAI bridge.
+- Generic shell command execution.

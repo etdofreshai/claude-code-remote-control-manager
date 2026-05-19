@@ -41,7 +41,7 @@ Everything else is commanded through the server API.
 - Remote control is available only while `ccrc-client` is intentionally running.
 - Client shutdown calls `enableRemoteControl(false)` for active sessions and then disconnects.
 
-Important caveat: the HTTP API does not expose a generic shell endpoint, but a remote-controlled Claude Code session can still perform powerful actions through Claude Code tools according to the permission mode and filesystem access of the client process. Treat `REMOTE_TOKEN` / `CCRC_TOKEN` as a powerful secret and expose the server only on trusted networks or behind trusted auth.
+Important caveat: the HTTP API does not expose a generic shell endpoint, but a remote-controlled Claude Code session can still perform powerful actions through Claude Code tools according to the permission mode and filesystem access of the client process. Treat `CCRCM_TOKEN` / `CCRC_TOKEN` as a powerful secret and expose the server only on trusted networks or behind trusted auth.
 
 ## Server
 
@@ -56,7 +56,7 @@ npm start
 Environment:
 
 ```bash
-REMOTE_TOKEN=change-me
+CCRCM_TOKEN=change-me
 PORT=3000
 STATE_FILE=./data/state.json
 ```
@@ -127,7 +127,7 @@ There are separate Dockerfiles for the server and client.
 ```bash
 docker build -t ccrc-server ./server
 docker run --rm -p 3000:3000 \
-  -e REMOTE_TOKEN=change-me \
+  -e CCRCM_TOKEN=change-me \
   -e STATE_FILE=/data/state.json \
   -v ccrc-server-data:/data \
   ccrc-server
@@ -162,7 +162,7 @@ Important: a client deployed on Dokploy controls Claude Code inside the Dokploy 
 Required compose env:
 
 ```bash
-REMOTE_TOKEN=change-me
+CCRCM_TOKEN=change-me
 ```
 
 Optional compose env:

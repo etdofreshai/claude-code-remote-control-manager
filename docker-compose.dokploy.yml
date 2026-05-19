@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     environment:
       PORT: "3000"
-      REMOTE_TOKEN: ${REMOTE_TOKEN:?set REMOTE_TOKEN}
+      CCRCM_TOKEN: ${CCRCM_TOKEN:?set CCRCM_TOKEN}
       STATE_FILE: /data/state.json
     volumes:
       - ccrc-server-data:/data
@@ -23,7 +23,7 @@ services:
       dockerfile: Dockerfile
     environment:
       CCRC_SERVER_URL: ${CCRC_SERVER_URL:-http://ccrc-server:3000}
-      CCRC_TOKEN: ${REMOTE_TOKEN:?set REMOTE_TOKEN}
+      CCRC_TOKEN: ${CCRCM_TOKEN:?set CCRCM_TOKEN}
       CCRC_NAME: ${CCRC_NAME:-dokploy-client}
       CCRC_PERMISSION_MODE: ${CCRC_PERMISSION_MODE:-bypassPermissions}
     volumes:

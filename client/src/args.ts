@@ -16,7 +16,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     i += 1;
   }
   const serverUrl = flags.get("server") ?? env.CCRC_SERVER_URL ?? env.SERVER_URL ?? "";
-  const token = flags.get("token") ?? env.CCRC_TOKEN ?? env.REMOTE_TOKEN ?? env.CLIENT_TOKEN ?? "";
+  const token = flags.get("token") ?? env.CCRCM_TOKEN ?? env.CCRC_TOKEN ?? env.REMOTE_TOKEN ?? env.CLIENT_TOKEN ?? "";
   const name = flags.get("name") ?? env.CCRC_NAME ?? env.AGENT_NAME ?? "";
   if (!serverUrl) throw new Error("server URL required: pass --server or set CCRC_SERVER_URL");
   if (!token) throw new Error("token required: pass --token or set CCRC_TOKEN");

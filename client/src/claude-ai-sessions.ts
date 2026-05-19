@@ -45,7 +45,7 @@ function compactSession(session: Record<string, unknown>) {
 async function main() {
   const flags = parseFlags(process.argv.slice(2));
   const serverUrl = (flags.get("server") ?? process.env.CCRC_SERVER_URL ?? process.env.SERVER_URL ?? "").replace(/\/+$/, "");
-  const ccrcToken = flags.get("token") ?? process.env.CCRC_TOKEN ?? process.env.REMOTE_TOKEN ?? process.env.CLIENT_TOKEN ?? "";
+  const ccrcToken = flags.get("token") ?? process.env.CCRCM_TOKEN ?? process.env.CCRC_TOKEN ?? process.env.REMOTE_TOKEN ?? process.env.CLIENT_TOKEN ?? "";
   const credentialsPath = flags.get("credentials") ?? process.env.CLAUDE_CREDENTIALS_PATH ?? path.join(homedir(), ".claude", ".credentials.json");
   const organizationUuid = flags.get("organization") ?? process.env.CLAUDE_AI_ORGANIZATION_UUID;
   const limit = Number(flags.get("limit") ?? process.env.LIMIT ?? "25");

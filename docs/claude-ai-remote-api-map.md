@@ -16,7 +16,10 @@ This document is observational. It maps the Claude.ai web APIs involved in remot
 
 1. List sessions: `GET /v1/sessions` optionally with `after_id` pagination.
 2. Open one session: `GET /v1/sessions/:session_id`.
-3. Fetch history: `GET /v1/sessions/:session_id/events?limit=1000` and later `after_id=...`.
+3. Fetch history page: `GET /v1/sessions/:session_id/events?limit=1000` and later `after_id=...`.
+   - CCRC mirror: `GET /api/claude-ai/sessions/:sessionId/events?limit=1000[&after_id=...]` returns the raw Claude.ai page shape.
+   - CCRC convenience: `GET /api/claude-ai/sessions/:sessionId/events/all?limit=1000&max_pages=10` follows `has_more`/`last_id` and concatenates raw event `data`.
+   - CCRC convenience: `GET /api/claude-ai/sessions/:sessionId/messages?limit=1000&max_pages=10` returns only user/assistant events with a `message` object.
 4. Mark web presence: `POST /v1/code/sessions/:control_session_id/client/presence`.
 5. Subscribe for live control/messages: `GET /v1/sessions/ws/:session_id/subscribe?...` websocket.
 6. Send a user message/event: `POST /v1/sessions/:session_id/events`.

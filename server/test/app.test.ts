@@ -108,6 +108,55 @@ test("claude.ai proxy requires forwarded Claude.ai auth", async () => {
   await app.close();
 });
 
+test("claude.ai proxy can page all events and expose message-only history", async () => {
+  const { app } = fixture();
+  await app.ready();
+
+  const originalFetch = globalThis.fetch;
+  const seenUrls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    seenUrls.push(url);
+    const parsed = new URL(url);
+    const afterId = parsed.searchParams.get("after_id");
+    const body = afterId
+      ? { data: [{ uuid: "event-2", type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "hello back" }] } }], first_id: "event-2", last_id: "event-2", has_more: false }
+      : { data: [{ uuid: "event-1", type: "user", message: { role: "user", content: "hello" } }, { uuid: "tool-1", type: "tool_use", message: null }], first_id: "event-1", last_id: "event-1", has_more: true };
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const headers = {
+      ...auth,
+      "x-claude-ai-authorization": "Bearer claude-token",
+      "x-claude-ai-organization-uuid": "org",
+      "x-claude-ai-version": "2023-06-01",
+      "x-claude-ai-beta": "ccr-byoc-2025-07-29",
+      "x-claude-ai-client-platform": "web_claude_ai",
+      "x-claude-ai-client-feature": "ccr",
+      "x-claude-ai-client-version": "1.0.0",
+    };
+
+    const all = await app.inject({ method: "GET", url: "/api/claude-ai/sessions/session_abc123/events/all?limit=1000&max_pages=5", headers });
+    assert.equal(all.statusCode, 200);
+    assert.equal(all.json().data.length, 3);
+    assert.equal(all.json().first_id, "event-1");
+    assert.equal(all.json().last_id, "event-2");
+    assert.equal(all.json().has_more, false);
+    assert.equal(all.json().pages, 2);
+    assert.ok(seenUrls[0].includes("/v1/sessions/session_abc123/events?limit=1000"));
+    assert.ok(seenUrls[1].includes("after_id=event-1"));
+
+    seenUrls.length = 0;
+    const messages = await app.inject({ method: "GET", url: "/api/claude-ai/sessions/session_abc123/messages?limit=1000", headers });
+    assert.equal(messages.statusCode, 200);
+    assert.deepEqual(messages.json().data.map((event: { uuid: string }) => event.uuid), ["event-1", "event-2"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await app.close();
+  }
+});
+
 test("operator can delete offline clients but not online clients without force", async () => {
   const { app, state } = fixture();
   await app.ready();

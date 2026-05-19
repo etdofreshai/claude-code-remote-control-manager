@@ -34,8 +34,8 @@ class FakeServer implements ServerApi {
   acks: unknown[] = [];
   disconnects: string[] = [];
   reports: unknown[] = [];
-  constructor(public commands: Array<RemoteCommand | null>) {}
-  async connect() { return { ok: true }; }
+  constructor(public commands: Array<RemoteCommand | null>, private readonly connectResult: unknown = { ok: true }) {}
+  async connect() { return this.connectResult; }
   async poll() { return this.commands.shift() ?? null; }
   async ack(id: string, body: { ok: boolean; result?: unknown; error?: string }) { this.acks.push({ id, ...body }); }
   async disconnect(name: string) { this.disconnects.push(name); }
@@ -51,8 +51,9 @@ test("runtime starts, resumes, lists, sends, and stops sessions from commands", 
     { id: "4", type: "message", payload: { sessionId: "old", text: "continue" } },
     { id: "5", type: "stop", payload: { sessionId: "old" } },
     { id: "6", type: "disconnect", payload: {} },
-  ]);
-  const runtime = new ClientRuntime({ name: "desktop", server, claude });
+  ], { pinnedSessions: [{ sessionId: "pinned", cwd: "/repo", name: "Pinned Work", remoteControl: true }] });
+  const logs: string[] = [];
+  const runtime = new ClientRuntime({ name: "desktop", server, claude, log: (message) => logs.push(message) });
 
   await runtime.runUntilDisconnected();
 
@@ -65,6 +66,12 @@ test("runtime starts, resumes, lists, sends, and stops sessions from commands", 
   ]);
   assert.equal(server.acks.length, 6);
   assert.deepEqual(server.disconnects, ["desktop"]);
+  assert.ok(logs.some((line) => line.includes("connected client=desktop")));
+  assert.ok(logs.some((line) => line.includes("pinned sessions at startup: 1")));
+  assert.ok(logs.some((line) => line.includes("pinned sessionId=pinned")));
+  assert.ok(logs.some((line) => line.includes("created sessionId=new-session")));
+  assert.ok(logs.some((line) => line.includes("resumed sessionId=old")));
+  assert.ok(logs.some((line) => line.includes("destroyed sessionId=old")));
 });
 
 test("runtime acknowledges command errors without crashing", async () => {
@@ -73,7 +80,7 @@ test("runtime acknowledges command errors without crashing", async () => {
     { id: "bad", type: "message", payload: { sessionId: "missing" } },
     { id: "bye", type: "disconnect", payload: {} },
   ]);
-  const runtime = new ClientRuntime({ name: "desktop", server, claude });
+  const runtime = new ClientRuntime({ name: "desktop", server, claude, log: () => undefined });
 
   await runtime.runUntilDisconnected();
 

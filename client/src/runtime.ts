@@ -155,10 +155,16 @@ function describeSession(primary: unknown, fallback?: unknown): string {
   const cwd = stringField(primary, "cwd") ?? stringField(fallback, "cwd");
   const name = stringField(primary, "name") ?? stringField(primary, "title") ?? stringField(fallback, "name");
   const remoteControl = booleanField(primary, "remoteControl") ?? booleanField(fallback, "remoteControl");
+  const claudeAiSessionId = stringField(primary, "claudeAiSessionId") ?? stringField(fallback, "claudeAiSessionId");
+  const controlSessionId = stringField(primary, "controlSessionId") ?? stringField(fallback, "controlSessionId");
+  const sessionUrl = stringField(primary, "sessionUrl") ?? stringField(fallback, "sessionUrl");
   const parts = [`sessionId=${sessionId}`];
   if (name) parts.push(`name=${JSON.stringify(name)}`);
   if (cwd) parts.push(`cwd=${JSON.stringify(cwd)}`);
   if (remoteControl !== undefined) parts.push(`remoteControl=${remoteControl}`);
+  if (claudeAiSessionId) parts.push(`claudeAiSessionId=${claudeAiSessionId}`);
+  if (controlSessionId) parts.push(`controlSessionId=${controlSessionId}`);
+  if (sessionUrl) parts.push(`sessionUrl=${JSON.stringify(sessionUrl)}`);
   return parts.join(" ");
 }
 

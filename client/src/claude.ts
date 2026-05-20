@@ -5,6 +5,14 @@ import path from "node:path";
 import os from "node:os";
 import type { ClaudeController } from "./types.js";
 
+interface RemoteControlMetadata {
+  remoteControlInfo?: unknown;
+  claudeAiSessionId?: string;
+  controlSessionId?: string;
+  sessionUrl?: string;
+  bridgePointer?: unknown;
+}
+
 interface RunningSession {
   sessionId: string;
   cwd: string;
@@ -12,6 +20,7 @@ interface RunningSession {
   push: (message: unknown) => void;
   close: () => void;
   query: any;
+  remoteControlMetadata?: RemoteControlMetadata;
 }
 
 export class ClaudeSdkController implements ClaudeController {
@@ -26,12 +35,12 @@ export class ClaudeSdkController implements ClaudeController {
   async startSession(input: { cwd: string; name?: string; text?: string }): Promise<unknown> {
     const sessionId = randomUUID();
     const session = await this.spawn({ sessionId, cwd: input.cwd, resume: false, name: input.name, text: input.text });
-    return { sessionId: session.sessionId, cwd: session.cwd, name: input.name, remoteControl: true };
+    return { sessionId: session.sessionId, cwd: session.cwd, name: input.name, remoteControl: true, ...session.remoteControlMetadata };
   }
 
   async resumeSession(input: { sessionId: string; cwd: string; name?: string }): Promise<unknown> {
     const session = await this.spawn({ sessionId: input.sessionId, cwd: input.cwd, resume: true, name: input.name });
-    return { sessionId: session.sessionId, cwd: session.cwd, name: input.name, remoteControl: true };
+    return { sessionId: session.sessionId, cwd: session.cwd, name: input.name, remoteControl: true, ...session.remoteControlMetadata };
   }
 
   async sendMessage(input: { sessionId: string; text: string }): Promise<unknown> {
@@ -86,7 +95,7 @@ export class ClaudeSdkController implements ClaudeController {
     this.running.set(input.sessionId, running);
 
     void this.consume(running);
-    await enableRemoteControl(q);
+    running.remoteControlMetadata = await enableRemoteControl(q, input.name, input.cwd);
     if (input.name) await tryRename(input.sessionId, input.name, input.cwd);
     return running;
   }
@@ -134,11 +143,83 @@ function choosePermissionMode(): string {
   return "bypassPermissions";
 }
 
-async function enableRemoteControl(q: any): Promise<void> {
+async function enableRemoteControl(q: any, name: string | undefined, cwd: string): Promise<RemoteControlMetadata> {
   try {
-    await q.enableRemoteControl(true);
+    const remoteControlInfo = await q.enableRemoteControl(true, name);
+    const bridgePointer = readBridgePointer(cwd);
+    return summarizeRemoteControlMetadata(remoteControlInfo, bridgePointer);
   } catch (err) {
     throw new Error(`enableRemoteControl(true) failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function summarizeRemoteControlMetadata(remoteControlInfo: unknown, bridgePointer: unknown): RemoteControlMetadata {
+  const values = [...collectStrings(remoteControlInfo), ...collectStrings(bridgePointer)];
+  const controlSessionId = values.find((value) => /^cse_[A-Za-z0-9]+$/.test(value)) ?? toControlSessionId(values.find((value) => /^session_[A-Za-z0-9]+$/.test(value)));
+  const claudeAiSessionId = values.find((value) => /^session_[A-Za-z0-9]+$/.test(value)) ?? toClaudeAiSessionId(controlSessionId);
+  const sessionUrl = values.find((value) => /\/code\/(session_|cse_)[A-Za-z0-9]+/.test(value));
+  return compactObject({ remoteControlInfo, bridgePointer, claudeAiSessionId, controlSessionId, sessionUrl });
+}
+
+function toClaudeAiSessionId(value: string | undefined): string | undefined {
+  return value?.startsWith("cse_") ? `session_${value.slice(4)}` : value;
+}
+
+function toControlSessionId(value: string | undefined): string | undefined {
+  return value?.startsWith("session_") ? `cse_${value.slice(8)}` : value;
+}
+
+function collectStrings(value: unknown): string[] {
+  const strings: string[] = [];
+  const seen = new Set<unknown>();
+  const visit = (current: unknown) => {
+    if (typeof current === "string") {
+      strings.push(current);
+      return;
+    }
+    if (!current || typeof current !== "object" || seen.has(current)) return;
+    seen.add(current);
+    if (Array.isArray(current)) {
+      for (const item of current) visit(item);
+      return;
+    }
+    for (const item of Object.values(current as Record<string, unknown>)) visit(item);
+  };
+  visit(value);
+  return strings;
+}
+
+function compactObject<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
+}
+
+function readBridgePointer(cwd: string): unknown | undefined {
+  const root = path.join(os.homedir(), ".claude", "projects");
+  if (!existsSync(root)) return undefined;
+  const candidates = new Set<string>([projectSlug(cwd)]);
+  const resolved = safeRealpath(cwd);
+  if (resolved) candidates.add(projectSlug(resolved));
+  for (const slug of candidates) {
+    const pointerPath = path.join(root, slug, "bridge-pointer.json");
+    if (!existsSync(pointerPath)) continue;
+    try {
+      return JSON.parse(readFileSync(pointerPath, "utf8"));
+    } catch (err) {
+      console.error(`failed to read bridge pointer ${pointerPath}`, err);
+    }
+  }
+  return undefined;
+}
+
+function projectSlug(cwd: string): string {
+  return cwd.replace(/\\/g, "/").replace(/[^A-Za-z0-9]/g, "-");
+}
+
+function safeRealpath(cwd: string): string | undefined {
+  try {
+    return path.resolve(cwd);
+  } catch {
+    return undefined;
   }
 }
 

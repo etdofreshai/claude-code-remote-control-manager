@@ -16,6 +16,11 @@ export interface PinnedSession {
   name?: string;
   remoteControl: boolean;
   lastStartedAt?: string;
+  claudeAiSessionId?: string;
+  controlSessionId?: string;
+  sessionUrl?: string;
+  remoteControlInfo?: unknown;
+  bridgePointer?: unknown;
 }
 
 export interface ClientInfo {
@@ -236,6 +241,7 @@ export class RemoteControlState {
           name: payload.name,
           remoteControl: true,
           lastStartedAt: new Date().toISOString(),
+          ...remoteControlMetadataFromResult(result),
         });
       }
       return result;
@@ -255,7 +261,18 @@ export class RemoteControlState {
     if (!this.isClientOnline(name)) {
       return Promise.resolve({ queuedForReconnect: true, sessionId: payload.sessionId });
     }
-    return this.enqueue(name, "resume", { ...payload, remoteControl: true });
+    return this.enqueue(name, "resume", { ...payload, remoteControl: true }).then((result) => {
+      const sessionId = sessionIdFromResult(result) ?? payload.sessionId;
+      this.pinSession(name, {
+        sessionId,
+        cwd: payload.cwd,
+        name: payload.name,
+        remoteControl: true,
+        lastStartedAt: new Date().toISOString(),
+        ...remoteControlMetadataFromResult(result),
+      });
+      return result;
+    });
   }
 
   enqueueMessage(clientName: string, payload: { sessionId: string; text: string }): Promise<unknown> {
@@ -381,4 +398,17 @@ function sessionIdFromResult(result: unknown): string | undefined {
   if (!result || typeof result !== "object") return undefined;
   const maybe = (result as { sessionId?: unknown }).sessionId;
   return typeof maybe === "string" && maybe ? maybe : undefined;
+}
+
+function remoteControlMetadataFromResult(result: unknown): Partial<PinnedSession> {
+  if (!result || typeof result !== "object") return {};
+  const source = result as Record<string, unknown>;
+  const metadata: Partial<PinnedSession> = {};
+  for (const key of ["claudeAiSessionId", "controlSessionId", "sessionUrl"] as const) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) metadata[key] = value;
+  }
+  if (source.remoteControlInfo !== undefined) metadata.remoteControlInfo = source.remoteControlInfo;
+  if (source.bridgePointer !== undefined) metadata.bridgePointer = source.bridgePointer;
+  return metadata;
 }

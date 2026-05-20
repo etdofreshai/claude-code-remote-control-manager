@@ -155,10 +155,15 @@ async function enableRemoteControl(q: any, name: string | undefined, cwd: string
 
 function summarizeRemoteControlMetadata(remoteControlInfo: unknown, bridgePointer: unknown): RemoteControlMetadata {
   const values = [...collectStrings(remoteControlInfo), ...collectStrings(bridgePointer)];
-  const controlSessionId = values.find((value) => /^cse_[A-Za-z0-9]+$/.test(value)) ?? toControlSessionId(values.find((value) => /^session_[A-Za-z0-9]+$/.test(value)));
-  const claudeAiSessionId = values.find((value) => /^session_[A-Za-z0-9]+$/.test(value)) ?? toClaudeAiSessionId(controlSessionId);
+  const ids = values.flatMap(extractRemoteSessionIds);
+  const controlSessionId = ids.find((value) => value.startsWith("cse_")) ?? toControlSessionId(ids.find((value) => value.startsWith("session_")));
+  const claudeAiSessionId = ids.find((value) => value.startsWith("session_")) ?? toClaudeAiSessionId(controlSessionId);
   const sessionUrl = values.find((value) => /\/code\/(session_|cse_)[A-Za-z0-9]+/.test(value));
   return compactObject({ remoteControlInfo, bridgePointer, claudeAiSessionId, controlSessionId, sessionUrl });
+}
+
+function extractRemoteSessionIds(value: string): string[] {
+  return value.match(/(?:session|cse)_[A-Za-z0-9]+/g) ?? [];
 }
 
 function toClaudeAiSessionId(value: string | undefined): string | undefined {

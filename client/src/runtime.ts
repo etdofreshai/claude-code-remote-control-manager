@@ -78,6 +78,12 @@ export class ClientRuntime {
       const text = requiredString(payload.text, "text");
       return this.claude.sendMessage({ sessionId, text });
     }
+    if (command.type === "interrupt") {
+      const sessionId = requiredString(payload.sessionId, "sessionId");
+      const text = optionalString(payload.text);
+      const name = optionalString(payload.name);
+      return this.claude.interruptSession({ sessionId, text, name });
+    }
     if (command.type === "stop") {
       const sessionId = requiredString(payload.sessionId, "sessionId");
       return this.claude.stopSession(sessionId);
@@ -117,6 +123,10 @@ export class ClientRuntime {
     }
     if (command.type === "resume") {
       this.log(`[remote-control] resumed ${describeSession(result, command.payload)}`);
+      return;
+    }
+    if (command.type === "interrupt") {
+      this.log(`[remote-control] interrupted ${describeSession(result, command.payload)}`);
       return;
     }
     if (command.type === "stop") {

@@ -104,6 +104,19 @@ export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
     return state.enqueueMessage(name, { sessionId, text: body.text });
   });
 
+  app.post("/api/clients/:name/sessions/:sessionId/interrupt", async (req) => {
+    const { name, sessionId } = req.params as { name: string; sessionId: string };
+    const body = (req.body ?? {}) as { text?: string; name?: string };
+    return state.enqueueInterrupt(name, { sessionId, text: body.text, name: body.name });
+  });
+
+  app.post("/api/clients/:name/sessions/:sessionId/interrupt-and-message", async (req) => {
+    const { name, sessionId } = req.params as { name: string; sessionId: string };
+    const body = (req.body ?? {}) as { text?: string; name?: string };
+    if (!body.text) throw new Error("text required");
+    return state.enqueueInterrupt(name, { sessionId, text: body.text, name: body.name });
+  });
+
   app.post("/api/clients/:name/sessions/:sessionId/stop", async (req) => {
     const { name, sessionId } = req.params as { name: string; sessionId: string };
     return state.enqueueStop(name, { sessionId });

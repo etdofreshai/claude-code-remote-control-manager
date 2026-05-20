@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-export type CommandType = "list-sessions" | "start" | "resume" | "message" | "stop" | "disconnect";
+export type CommandType = "list-sessions" | "start" | "resume" | "message" | "interrupt" | "stop" | "disconnect";
 
 export interface RemoteCommand {
   id: string;
@@ -291,6 +291,17 @@ export class RemoteControlState {
   enqueueMessage(clientName: string, payload: { sessionId: string; text: string }): Promise<unknown> {
     if (!payload.sessionId || !payload.text) throw new Error("sessionId and text required");
     return this.enqueue(normalizeName(clientName), "message", payload);
+  }
+
+  enqueueInterrupt(clientName: string, payload: { sessionId: string; text?: string; name?: string }): Promise<unknown> {
+    if (!payload.sessionId) throw new Error("sessionId required");
+    return this.enqueue(normalizeName(clientName), "interrupt", payload).then((result) => {
+      const sessionId = sessionIdFromResult(result) ?? payload.sessionId;
+      const client = this.clients.get(normalizeName(clientName));
+      const existing = client?.pinnedSessions.find((s) => s.sessionId === sessionId);
+      if (existing) this.pinSession(clientName, { ...existing, name: payload.name ?? existing.name, ...remoteControlMetadataFromResult(result) });
+      return result;
+    });
   }
 
   enqueueStop(clientName: string, payload: { sessionId: string }): Promise<unknown> {

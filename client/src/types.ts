@@ -1,4 +1,4 @@
-export type CommandType = "list-sessions" | "start" | "resume" | "message" | "stop" | "disconnect";
+export type CommandType = "list-sessions" | "start" | "resume" | "message" | "interrupt" | "stop" | "disconnect";
 
 export interface RemoteCommand {
   id: string;
@@ -19,6 +19,7 @@ export interface ClaudeController {
   startSession(input: { cwd: string; name?: string; text?: string }): Promise<unknown>;
   resumeSession(input: { sessionId: string; cwd: string; name?: string }): Promise<unknown>;
   sendMessage(input: { sessionId: string; text: string }): Promise<unknown>;
+  interruptSession(input: { sessionId: string; text?: string; name?: string }): Promise<unknown>;
   stopSession(sessionId: string): Promise<unknown>;
   shutdown(): Promise<void>;
 }

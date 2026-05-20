@@ -50,6 +50,18 @@ export class ClaudeSdkController implements ClaudeController {
     return { sent: true };
   }
 
+  async interruptSession(input: { sessionId: string; text?: string; name?: string }): Promise<unknown> {
+    const session = this.running.get(input.sessionId);
+    if (!session) throw new Error(`session not running: ${input.sessionId}`);
+    const cwd = session.cwd;
+    this.running.delete(session.sessionId);
+    try { session.abort.abort(); } catch { /* noop */ }
+    try { session.close(); } catch { /* noop */ }
+    const resumed = await this.spawn({ sessionId: input.sessionId, cwd, resume: true, name: input.name });
+    if (input.text?.trim()) resumed.push(userMessage(input.text.trim()));
+    return { sessionId: resumed.sessionId, cwd: resumed.cwd, name: input.name, interrupted: true, steered: Boolean(input.text?.trim()), remoteControl: true, ...resumed.remoteControlMetadata };
+  }
+
   async stopSession(sessionId: string): Promise<unknown> {
     const session = this.running.get(sessionId);
     if (!session) return { stopped: false, reason: "not running" };
@@ -108,7 +120,7 @@ export class ClaudeSdkController implements ClaudeController {
     } catch (err) {
       if (!session.abort.signal.aborted) console.error(`Claude session ${session.sessionId} errored`, err);
     } finally {
-      this.running.delete(session.sessionId);
+      if (this.running.get(session.sessionId) === session) this.running.delete(session.sessionId);
     }
   }
 

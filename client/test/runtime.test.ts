@@ -21,6 +21,10 @@ class FakeClaude implements ClaudeController {
     this.calls.push({ name: "sendMessage", args: input });
     return { sent: true };
   }
+  async interruptSession(input: { sessionId: string; text?: string; name?: string }) {
+    this.calls.push({ name: "interruptSession", args: input });
+    return { sessionId: input.sessionId, interrupted: true, steered: Boolean(input.text) };
+  }
   async stopSession(sessionId: string) {
     this.calls.push({ name: "stopSession", args: sessionId });
     return { stopped: true };
@@ -49,8 +53,9 @@ test("runtime starts, resumes, lists, sends, and stops sessions from commands", 
     { id: "2", type: "resume", payload: { cwd: "/repo", sessionId: "old", name: "old" } },
     { id: "3", type: "list-sessions", payload: {} },
     { id: "4", type: "message", payload: { sessionId: "old", text: "continue" } },
-    { id: "5", type: "stop", payload: { sessionId: "old" } },
-    { id: "6", type: "disconnect", payload: {} },
+    { id: "5", type: "interrupt", payload: { sessionId: "old", text: "wait, inspect first", name: "steered" } },
+    { id: "6", type: "stop", payload: { sessionId: "old" } },
+    { id: "7", type: "disconnect", payload: {} },
   ], { pinnedSessions: [{ sessionId: "pinned", cwd: "/repo", name: "Pinned Work", remoteControl: true }] });
   const logs: string[] = [];
   const runtime = new ClientRuntime({ name: "desktop", server, claude, log: (message) => logs.push(message) });
@@ -61,10 +66,11 @@ test("runtime starts, resumes, lists, sends, and stops sessions from commands", 
     "startSession",
     "resumeSession",
     "sendMessage",
+    "interruptSession",
     "stopSession",
     "shutdown",
   ]);
-  assert.equal(server.acks.length, 6);
+  assert.equal(server.acks.length, 7);
   assert.deepEqual(server.disconnects, ["desktop"]);
   assert.ok(logs.some((line) => line.includes("connected client=desktop")));
   assert.ok(logs.some((line) => line.includes("pinned sessions at startup: 1")));

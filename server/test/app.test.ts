@@ -300,3 +300,39 @@ test("resume-by-remote returns candidates when mapping is ambiguous", async () =
     await app.close();
   }
 });
+
+test("operator interrupt enqueues command and resolves from agent ack", async () => {
+  const { app } = fixture();
+  await app.ready();
+  await app.inject({ method: "POST", url: "/api/agent/connect", headers: auth, payload: { name: "desktop" } });
+
+  const interruptPromise = app.inject({
+    method: "POST",
+    url: "/api/clients/desktop/sessions/55555555-5555-4555-8555-555555555555/interrupt-and-message",
+    headers: auth,
+    payload: { text: "stop and inspect first", name: "steered" },
+  });
+
+  const poll = await app.inject({ method: "GET", url: "/api/agent/poll?name=desktop", headers: auth });
+  assert.equal(poll.statusCode, 200);
+  const cmd = poll.json();
+  assert.equal(cmd.type, "interrupt");
+  assert.equal(cmd.payload.sessionId, "55555555-5555-4555-8555-555555555555");
+  assert.equal(cmd.payload.text, "stop and inspect first");
+  assert.equal(cmd.payload.name, "steered");
+
+  const ack = await app.inject({
+    method: "POST",
+    url: "/api/agent/ack",
+    headers: auth,
+    payload: { id: cmd.id, ok: true, result: { sessionId: "55555555-5555-4555-8555-555555555555", interrupted: true, steered: true, claudeAiSessionId: "session_interrupt" } },
+  });
+  assert.equal(ack.statusCode, 200);
+
+  const interrupted = await interruptPromise;
+  assert.equal(interrupted.statusCode, 200);
+  assert.equal(interrupted.json().interrupted, true);
+  assert.equal(interrupted.json().steered, true);
+
+  await app.close();
+});

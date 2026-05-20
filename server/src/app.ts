@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import websocket from "@fastify/websocket";
 import { registerClaudeAiProxyRoutes } from "./claude-ai-proxy.js";
 import { helpJson, helpMarkdown } from "./help.js";
 import { RemoteControlState } from "./state.js";
@@ -12,6 +13,7 @@ export interface CreateAppOptions {
 export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
   if (!token) throw new Error("token required");
   const app = Fastify({ logger: process.env.LOG_LEVEL ? { level: process.env.LOG_LEVEL } : false });
+  void app.register(websocket);
 
   app.addHook("preHandler", async (req: FastifyRequest, reply: FastifyReply) => {
     if (req.url === "/healthz" || req.url === "/help") return;
@@ -31,6 +33,52 @@ export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
   app.get("/api/help", async () => helpJson());
 
   registerClaudeAiProxyRoutes(app);
+
+  void app.register(async function websocketRoutes(wsApp) {
+    wsApp.get("/api/agent/ws", { websocket: true }, (socket, req) => {
+    const name = (req.query as { name?: string }).name;
+    if (!name) {
+      socket.close(1008, "name required");
+      return;
+    }
+    const client = state.connectClient({ name });
+    const send = (message: unknown): boolean => {
+      if (socket.readyState !== socket.OPEN) return false;
+      socket.send(JSON.stringify(message));
+      return true;
+    };
+    state.registerPushClient(name, (command) => send({ type: "command", command }));
+    send({ type: "connected", result: client });
+
+    socket.on("message", (raw: Buffer) => {
+      try {
+        const message = JSON.parse(raw.toString()) as { type?: string; id?: string; ok?: boolean; result?: unknown; error?: string; sessions?: unknown[] };
+        if (message.type === "ack") {
+          if (!message.id) throw new Error("id required");
+          state.ackCommand(message.id, { ok: message.ok, result: message.result, error: message.error });
+          return;
+        }
+        if (message.type === "sessions") {
+          state.reportSessions(name, Array.isArray(message.sessions) ? message.sessions : []);
+          return;
+        }
+        if (message.type === "disconnect") {
+          state.disconnectClient(name);
+          socket.close(1000, "client disconnect");
+          return;
+        }
+        send({ type: "error", error: `unknown websocket message type: ${message.type ?? "missing"}` });
+      } catch (err) {
+        send({ type: "error", error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    socket.on("close", () => {
+      state.unregisterPushClient(name);
+      state.disconnectClient(name);
+    });
+  });
+  });
 
   app.get("/api/clients", async () => state.listClients());
 

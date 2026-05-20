@@ -78,6 +78,7 @@ export class RemoteControlState {
   private waiters = new Map<string, Array<(command: RemoteCommand | null) => void>>();
   private pending = new Map<string, PendingAck>();
   private fireAndForget = new Map<string, FireAndForgetAck>();
+  private pushSenders = new Map<string, (command: RemoteCommand) => boolean>();
 
   constructor(options: RemoteControlStateOptions) {
     this.stateFile = options.stateFile;
@@ -115,11 +116,28 @@ export class RemoteControlState {
 
   disconnectClient(nameInput: string): void {
     const name = normalizeName(nameInput);
+    this.pushSenders.delete(name);
     const prev = this.clients.get(name);
     if (!prev) return;
     this.clients.set(name, { ...prev, online: false, lastSeenAt: new Date().toISOString() });
     this.releaseWaiters(name);
     this.save();
+  }
+
+  registerPushClient(nameInput: string, sender: (command: RemoteCommand) => boolean): void {
+    const name = normalizeName(nameInput);
+    this.pushSenders.set(name, sender);
+    const queued = this.queues.get(name) ?? [];
+    const remaining: RemoteCommand[] = [];
+    for (const command of queued) {
+      if (!sender(command)) remaining.push(command);
+    }
+    if (remaining.length) this.queues.set(name, remaining);
+    else this.queues.delete(name);
+  }
+
+  unregisterPushClient(nameInput: string): void {
+    this.pushSenders.delete(normalizeName(nameInput));
   }
 
   reportSessions(nameInput: string, sessions: unknown[]): ClientInfo {
@@ -220,6 +238,7 @@ export class RemoteControlState {
 
     this.clients.delete(name);
     this.queues.delete(name);
+    this.pushSenders.delete(name);
     this.releaseWaiters(name);
 
     for (const [commandId, pending] of this.pending.entries()) {
@@ -407,6 +426,8 @@ export class RemoteControlState {
   }
 
   private deliver(clientName: string, command: RemoteCommand): void {
+    const sender = this.pushSenders.get(clientName);
+    if (sender?.(command)) return;
     const callbacks = this.waiters.get(clientName);
     if (callbacks?.length) callbacks.shift()!(command);
     else this.queues.set(clientName, [...(this.queues.get(clientName) ?? []), command]);

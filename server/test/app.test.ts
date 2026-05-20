@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import WebSocket from "ws";
 import { createApp } from "../src/app.ts";
 import { RemoteControlState } from "../src/state.ts";
 
@@ -336,3 +337,40 @@ test("operator interrupt enqueues command and resolves from agent ack", async ()
 
   await app.close();
 });
+
+
+test("websocket agent receives pushed commands and can ack", async () => {
+  const { app, state } = fixture();
+  await app.listen({ host: "127.0.0.1", port: 0 });
+  const address = app.server.address();
+  assert.equal(typeof address, "object");
+  const port = (address as { port: number }).port;
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/api/agent/ws?name=desktop`, { headers: auth });
+  const messages: any[] = [];
+  ws.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+
+  await waitFor(() => messages.some((m) => m.type === "connected"));
+  assert.equal(state.getClient("desktop")?.online, true);
+
+  const messagePromise = state.enqueueMessage("desktop", { sessionId: "local-1", text: "hello over ws" });
+  await waitFor(() => messages.some((m) => m.type === "command"));
+  const command = messages.find((m) => m.type === "command").command;
+  assert.equal(command.type, "message");
+  assert.equal(command.payload.text, "hello over ws");
+
+  ws.send(JSON.stringify({ type: "ack", id: command.id, ok: true, result: { sent: true } }));
+  assert.deepEqual(await messagePromise, { sent: true });
+
+  ws.close();
+  await app.close();
+});
+
+async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for condition");
+}

@@ -4,9 +4,13 @@ import { parseArgs } from "./args.js";
 import { ClaudeSdkController } from "./claude.js";
 import { ClientRuntime } from "./runtime.js";
 import { HttpServerApi } from "./server-api.js";
+import { WebSocketServerApi } from "./ws-server-api.js";
 
 const args = parseArgs(process.argv.slice(2));
-const server = new HttpServerApi({ serverUrl: args.serverUrl, token: args.token, name: args.name });
+const preferHttp = process.env.CCRC_TRANSPORT?.toLowerCase() === "http";
+const server = preferHttp
+  ? new HttpServerApi({ serverUrl: args.serverUrl, token: args.token, name: args.name })
+  : new WebSocketServerApi({ serverUrl: args.serverUrl, token: args.token, name: args.name });
 const claude = new ClaudeSdkController();
 const runtime = new ClientRuntime({ name: args.name, server, claude });
 
@@ -25,7 +29,7 @@ async function stop(signal: string): Promise<void> {
 process.on("SIGINT", () => void stop("SIGINT"));
 process.on("SIGTERM", () => void stop("SIGTERM"));
 
-console.log(`connecting ${args.name} to ${args.serverUrl}`);
+console.log(`connecting ${args.name} to ${args.serverUrl} via ${preferHttp ? "http long-poll" : "websocket"}`);
 runtime.runUntilDisconnected().catch((err) => {
   console.error(err);
   process.exit(1);

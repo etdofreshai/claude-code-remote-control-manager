@@ -286,28 +286,34 @@ function listClaudeJsonlSessions(): Array<{ sessionId: string; cwd: string; upda
       if (!file.endsWith(".jsonl")) continue;
       const sessionId = file.replace(/\.jsonl$/, "");
       const fullPath = path.join(dir, file);
+      const metadata = readSessionMetadata(fullPath);
       sessions.push({
         sessionId,
-        cwd: projectDir.name.replace(/-/g, "/"),
-        updatedAt: statSync(fullPath).mtime.toISOString(),
-        title: readTitle(fullPath),
+        cwd: metadata.cwd ?? projectDir.name.replace(/-/g, "/"),
+        updatedAt: metadata.updatedAt ?? statSync(fullPath).mtime.toISOString(),
+        title: metadata.title,
       });
     }
   }
   return sessions.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
-
-function readTitle(file: string): string | undefined {
+function readSessionMetadata(file: string): { cwd?: string; updatedAt?: string; title?: string } {
+  const metadata: { cwd?: string; updatedAt?: string; title?: string } = {};
   try {
-    const lines = readFileSync(file, "utf8").split("\n").slice(0, 20);
-    for (const line of lines) {
+    const lines = readFileSync(file, "utf8").split("\n");
+    for (const line of lines.slice(0, 80)) {
       if (!line.trim()) continue;
       const parsed = JSON.parse(line) as any;
-      const text = parsed?.summary ?? parsed?.message?.content;
-      if (typeof text === "string" && text.trim()) return text.trim().slice(0, 120);
+      if (!metadata.cwd && typeof parsed?.cwd === "string" && parsed.cwd.trim()) metadata.cwd = parsed.cwd.trim();
+      if (!metadata.updatedAt && typeof parsed?.timestamp === "string" && parsed.timestamp.trim()) metadata.updatedAt = parsed.timestamp.trim();
+      if (!metadata.title) {
+        const text = parsed?.summary ?? parsed?.message?.content;
+        if (typeof text === "string" && text.trim()) metadata.title = text.trim().slice(0, 120);
+      }
+      if (metadata.cwd && metadata.updatedAt && metadata.title) break;
     }
   } catch {
-    return undefined;
+    return metadata;
   }
-  return undefined;
+  return metadata;
 }

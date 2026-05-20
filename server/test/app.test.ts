@@ -187,3 +187,116 @@ test("operator can delete offline clients but not online clients without force",
 
   await app.close();
 });
+
+test("resolves remote Claude.ai URL by direct pinned metadata", async () => {
+  const { app, state } = fixture();
+  await app.ready();
+  await app.inject({ method: "POST", url: "/api/agent/connect", headers: auth, payload: { name: "desktop" } });
+  state.pinSession("desktop", {
+    sessionId: "11111111-1111-4111-8111-111111111111",
+    cwd: "/repo",
+    name: "direct",
+    remoteControl: true,
+    claudeAiSessionId: "session_abc123",
+    controlSessionId: "cse_abc123",
+    sessionUrl: "https://claude.ai/code/session_abc123",
+  });
+
+  const resolved = await app.inject({
+    method: "POST",
+    url: "/api/sessions/resolve-remote",
+    headers: { ...auth, "x-claude-ai-authorization": "Bearer unused" },
+    payload: { url: "https://claude.ai/code/session_abc123" },
+  });
+  assert.equal(resolved.statusCode, 200);
+  assert.equal(resolved.json().resolved, true);
+  assert.equal(resolved.json().exact.client, "desktop");
+  assert.equal(resolved.json().exact.sessionId, "11111111-1111-4111-8111-111111111111");
+  assert.equal(resolved.json().exact.source, "pinned");
+
+  await app.close();
+});
+
+test("resolves remote Claude.ai URL by metadata matched against knownSessions", async () => {
+  const { app } = fixture();
+  await app.ready();
+  await app.inject({
+    method: "POST",
+    url: "/api/agent/connect",
+    headers: auth,
+    payload: {
+      name: "desktop",
+      knownSessions: [
+        { sessionId: "22222222-2222-4222-8222-222222222222", cwd: "D:/Projects/Other", title: "other", updatedAt: "2026-05-20T00:00:00.000Z" },
+        { sessionId: "33333333-3333-4333-8333-333333333333", cwd: "D:\\Projects\\AI Retrospective Presentation Mid-2026", title: "You are running as AI Field Retrospective", running: true, updatedAt: "2026-05-20T02:25:00.000Z" },
+      ],
+    },
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    id: "session_remote123",
+    title: "AI Field Retrospective",
+    updated_at: "2026-05-20T02:25:30.000Z",
+    tags: ["remote-control-sdk"],
+    session_context: {
+      cwd: "D:\\Projects\\AI Retrospective Presentation Mid-2026",
+      outcomes: [{ git_info: { repo: "ETdoFresh/AI-Retrospective-Presentation-Mid-2026", branches: ["main"] } }],
+    },
+  }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+
+  try {
+    const resolved = await app.inject({
+      method: "POST",
+      url: "/api/sessions/resolve-remote",
+      headers: { ...auth, "x-claude-ai-authorization": "Bearer claude-token" },
+      payload: { url: "https://claude.ai/code/session_remote123" },
+    });
+    assert.equal(resolved.statusCode, 200);
+    assert.equal(resolved.json().resolved, true);
+    assert.equal(resolved.json().exact.sessionId, "33333333-3333-4333-8333-333333333333");
+    assert.equal(resolved.json().exact.claudeAiSessionId, "session_remote123");
+  } finally {
+    globalThis.fetch = originalFetch;
+    await app.close();
+  }
+});
+
+test("resume-by-remote returns candidates when mapping is ambiguous", async () => {
+  const { app } = fixture();
+  await app.ready();
+  await app.inject({
+    method: "POST",
+    url: "/api/agent/connect",
+    headers: auth,
+    payload: {
+      name: "desktop",
+      knownSessions: [
+        { sessionId: "44444444-4444-4444-8444-444444444441", cwd: "/repo", title: "same" },
+        { sessionId: "44444444-4444-4444-8444-444444444442", cwd: "/repo", title: "same" },
+      ],
+    },
+  });
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    id: "session_ambig",
+    title: "same",
+    session_context: { cwd: "/repo" },
+  }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+
+  try {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/sessions/resume-by-remote",
+      headers: { ...auth, "x-claude-ai-authorization": "Bearer claude-token" },
+      payload: { remote: "session_ambig", client: "desktop" },
+    });
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.json().ambiguous, true);
+    assert.equal(res.json().candidates.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await app.close();
+  }
+});

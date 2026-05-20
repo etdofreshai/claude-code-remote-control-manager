@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { registerClaudeAiProxyRoutes } from "./claude-ai-proxy.js";
 import { helpJson, helpMarkdown } from "./help.js";
 import { RemoteControlState } from "./state.js";
+import { resolveRemoteSession } from "./remote-session-resolver.js";
 
 export interface CreateAppOptions {
   state: RemoteControlState;
@@ -73,6 +74,27 @@ export function createApp({ state, token }: CreateAppOptions): FastifyInstance {
     const body = (req.body ?? {}) as { cwd?: string; sessionId?: string; name?: string };
     if (!body.cwd || !body.sessionId) throw new Error("cwd and sessionId required");
     return state.enqueueResume(name, { cwd: body.cwd, sessionId: body.sessionId, name: body.name });
+  });
+
+  app.post("/api/sessions/resolve-remote", async (req) => {
+    const body = (req.body ?? {}) as { remote?: string; url?: string; client?: string };
+    return resolveRemoteSession({ state, req, remote: body.remote, url: body.url, client: body.client });
+  });
+
+  app.post("/api/sessions/resume-by-remote", async (req, reply) => {
+    const body = (req.body ?? {}) as { remote?: string; url?: string; client?: string; cwd?: string; name?: string };
+    const resolved = await resolveRemoteSession({ state, req, remote: body.remote, url: body.url, client: body.client });
+    if (!resolved.exact) {
+      reply.code(resolved.ambiguous ? 409 : 404).send({ error: resolved.ambiguous ? "ambiguous remote session mapping" : "remote session mapping not found", ...resolved });
+      return;
+    }
+    const cwd = body.cwd ?? resolved.exact.cwd;
+    if (!cwd) {
+      reply.code(400).send({ error: "resolved session has no cwd; pass cwd explicitly", resolved });
+      return;
+    }
+    const resume = await state.enqueueResume(resolved.exact.client, { sessionId: resolved.exact.sessionId, cwd, name: body.name ?? resolved.exact.name ?? resolved.exact.title });
+    return { resolved, resume };
   });
 
   app.post("/api/clients/:name/sessions/:sessionId/message", async (req) => {

@@ -113,7 +113,7 @@ function safeControlSessionId(id: string): string {
   return id;
 }
 
-async function fetchClaudeAiJson(req: FastifyRequest, options: ProxyOptions): Promise<unknown> {
+export async function fetchClaudeAiJson(req: FastifyRequest, options: ProxyOptions): Promise<unknown> {
   const headers = requireForwardedClaudeAuth(req);
   const url = new URL(options.upstreamPath, CLAUDE_AI_BASE_URL);
   appendQuery(url, options.query);

@@ -55,6 +55,12 @@ interface PendingAck {
   clientName: string;
 }
 
+interface FireAndForgetAck {
+  command: RemoteCommand;
+  clientName: string;
+  timer: NodeJS.Timeout;
+}
+
 export interface RemoteControlStateOptions {
   stateFile: string;
   pollTimeoutMs?: number;
@@ -71,6 +77,7 @@ export class RemoteControlState {
   private queues = new Map<string, RemoteCommand[]>();
   private waiters = new Map<string, Array<(command: RemoteCommand | null) => void>>();
   private pending = new Map<string, PendingAck>();
+  private fireAndForget = new Map<string, FireAndForgetAck>();
 
   constructor(options: RemoteControlStateOptions) {
     this.stateFile = options.stateFile;
@@ -222,6 +229,12 @@ export class RemoteControlState {
       this.pending.delete(commandId);
     }
 
+    for (const [commandId, tracked] of this.fireAndForget.entries()) {
+      if (tracked.clientName !== name) continue;
+      clearTimeout(tracked.timer);
+      this.fireAndForget.delete(commandId);
+    }
+
     this.save();
     return { deleted: true, online: current.online };
   }
@@ -315,11 +328,25 @@ export class RemoteControlState {
 
   ackCommand(commandId: string, body: { ok?: boolean; result?: unknown; error?: string }): void {
     const pending = this.pending.get(commandId);
-    if (!pending) return;
-    this.pending.delete(commandId);
-    clearTimeout(pending.timer);
-    if (body.ok === false || body.error) pending.reject(new Error(body.error ?? "command failed"));
-    else pending.resolve(body.result ?? {});
+    if (pending) {
+      this.pending.delete(commandId);
+      clearTimeout(pending.timer);
+      if (body.ok === false || body.error) pending.reject(new Error(body.error ?? "command failed"));
+      else pending.resolve(body.result ?? {});
+      return;
+    }
+
+    // Fire-and-forget commands (e.g. the pinned-session resume commands queued
+    // by connectClient) have no pending waiter, but a successful resume ACK
+    // still carries remote-control metadata worth persisting.
+    const tracked = this.fireAndForget.get(commandId);
+    if (!tracked) return;
+    this.fireAndForget.delete(commandId);
+    clearTimeout(tracked.timer);
+    const failed = body.ok === false || Boolean(body.error);
+    if (!failed && tracked.command.type === "resume") {
+      this.applyResumeAckMetadata(tracked.clientName, tracked.command, body.result);
+    }
   }
 
   private isClientOnline(clientName: string): boolean {
@@ -343,7 +370,29 @@ export class RemoteControlState {
 
   private enqueueFireAndForget(clientName: string, type: CommandType, payload: Record<string, unknown>): void {
     const command: RemoteCommand = { id: randomUUID(), type, payload };
+    const timer = setTimeout(() => {
+      this.fireAndForget.delete(command.id);
+    }, this.ackTimeoutMs);
+    this.fireAndForget.set(command.id, { command, clientName, timer });
     this.deliver(clientName, command);
+  }
+
+  /**
+   * Persist remote-control metadata returned by a successful fire-and-forget
+   * resume ACK onto the matching pinned session. Used for the auto-resume
+   * commands queued by connectClient, whose ACKs have no pending waiter.
+   */
+  private applyResumeAckMetadata(clientName: string, command: RemoteCommand, result: unknown): void {
+    const payloadSessionId =
+      typeof command.payload.sessionId === "string" ? command.payload.sessionId : undefined;
+    const sessionId = sessionIdFromResult(result) ?? payloadSessionId;
+    if (!sessionId) return;
+    const metadata = remoteControlMetadataFromResult(result);
+    if (Object.keys(metadata).length === 0) return;
+    const client = this.clients.get(clientName);
+    const existing = client?.pinnedSessions.find((s) => s.sessionId === sessionId);
+    if (!existing) return;
+    this.pinSession(clientName, { ...existing, ...metadata });
   }
 
   private deliver(clientName: string, command: RemoteCommand): void {

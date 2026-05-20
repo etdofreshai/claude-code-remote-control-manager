@@ -31,6 +31,73 @@ test("connect registers a client and queues persisted pinned sessions for restar
   });
 });
 
+test("fire-and-forget resume ack persists remote-control metadata onto the pinned session", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccrc-state-"));
+  const stateFile = path.join(dir, "state.json");
+  const state = new RemoteControlState({ stateFile, pollTimeoutMs: 5, ackTimeoutMs: 1000 });
+
+  const sessionId = "44444444-4444-4444-8444-444444444444";
+  state.pinSession("desktop", {
+    sessionId,
+    cwd: "/home/et/repos/app",
+    name: "app",
+    remoteControl: true,
+  });
+
+  // Reconnect queues a fire-and-forget resume command for the pinned session.
+  state.connectClient({ name: "desktop" });
+  const cmd = await state.takeNextCommand("desktop");
+  assert.equal(cmd?.type, "resume");
+  assert.equal(cmd?.payload.sessionId, sessionId);
+
+  // Client ACKs the auto-resume command with metadata from enableRemoteControl(true).
+  state.ackCommand(cmd!.id, {
+    ok: true,
+    result: {
+      sessionId,
+      cwd: "/home/et/repos/app",
+      name: "app",
+      remoteControl: true,
+      claudeAiSessionId: "session_abc",
+      controlSessionId: "cse_abc",
+      sessionUrl: "https://claude.ai/code/cse_abc",
+      remoteControlInfo: { raw: "info" },
+      bridgePointer: { pointer: "xyz" },
+    },
+  });
+
+  const pinned = state.getClient("desktop")?.pinnedSessions[0];
+  assert.equal(pinned?.sessionId, sessionId);
+  assert.equal(pinned?.claudeAiSessionId, "session_abc");
+  assert.equal(pinned?.controlSessionId, "cse_abc");
+  assert.equal(pinned?.sessionUrl, "https://claude.ai/code/cse_abc");
+  assert.deepEqual(pinned?.remoteControlInfo, { raw: "info" });
+  assert.deepEqual(pinned?.bridgePointer, { pointer: "xyz" });
+
+  const saved = JSON.parse(readFileSync(stateFile, "utf8"));
+  assert.equal(saved.clients.desktop.pinnedSessions[0].claudeAiSessionId, "session_abc");
+  assert.equal(saved.clients.desktop.pinnedSessions[0].controlSessionId, "cse_abc");
+  assert.equal(saved.clients.desktop.pinnedSessions[0].sessionUrl, "https://claude.ai/code/cse_abc");
+});
+
+test("failed fire-and-forget resume ack leaves the pinned session metadata untouched", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ccrc-state-"));
+  const stateFile = path.join(dir, "state.json");
+  const state = new RemoteControlState({ stateFile, pollTimeoutMs: 5, ackTimeoutMs: 1000 });
+
+  const sessionId = "77777777-7777-4777-8777-777777777777";
+  state.pinSession("desktop", { sessionId, cwd: "/repo", name: "repo", remoteControl: true });
+  state.connectClient({ name: "desktop" });
+  const cmd = await state.takeNextCommand("desktop");
+  assert.equal(cmd?.type, "resume");
+
+  state.ackCommand(cmd!.id, { ok: false, error: "resume failed" });
+
+  const pinned = state.getClient("desktop")?.pinnedSessions[0];
+  assert.equal(pinned?.claudeAiSessionId, undefined);
+  assert.equal(pinned?.controlSessionId, undefined);
+});
+
 test("new session command persists returned session id as pinned remote-control state", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ccrc-state-"));
   const stateFile = path.join(dir, "state.json");
